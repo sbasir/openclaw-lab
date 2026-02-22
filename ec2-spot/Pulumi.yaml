@@ -1,0 +1,12 @@
+name: openclaw-lab
+description: OpenClaw Lab running in Docker on AWS Spot Instance
+runtime:
+  name: python
+  options:
+    toolchain: uv
+    typechecker: mypy
+    virtualenv: venv    
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python
