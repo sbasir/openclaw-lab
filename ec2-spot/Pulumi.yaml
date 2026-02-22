@@ -5,7 +5,7 @@ runtime:
   options:
     toolchain: uv
     typechecker: mypy
-    virtualenv: venv    
+    virtualenv: .venv    
 config:
   pulumi:tags:
     value:
