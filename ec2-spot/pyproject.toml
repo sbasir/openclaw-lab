@@ -3,6 +3,7 @@ name = "openclaw-lab"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "jinja2>=3.1.6",
     "mypy>=1.0.0,<2.0.0",
     "pulumi>=3.0.0,<4.0.0",
     "pulumi-aws>=7.0.0,<8.0.0",

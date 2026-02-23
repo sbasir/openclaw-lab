@@ -1,0 +1,9 @@
+OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:main
+OPENCLAW_GATEWAY_TOKEN=change-me-now
+OPENCLAW_GATEWAY_BIND=lan
+OPENCLAW_GATEWAY_PORT=18789
+
+OPENCLAW_CONFIG_DIR=/home/ec2-user/.openclaw
+OPENCLAW_WORKSPACE_DIR=/home/ec2-user/.openclaw/workspace
+
+GOG_KEYRING_PASSWORD=change-me-now-needed-for-gog-gmail-cli-binary
