@@ -103,7 +103,7 @@ aws.iam.RolePolicyAttachment(
 )
 
 # Custom policy for SSM Parameter Store access
-_parameter_store_policy = aws.iam.RolePolicy(
+aws.iam.RolePolicy(
     f"{prefix}-parameter-store-policy",
     role=ec2_role.name,
     policy=aws.iam.get_policy_document(
@@ -114,7 +114,9 @@ _parameter_store_policy = aws.iam.RolePolicy(
                     "ssm:GetParameters",
                     "ssm:GetParametersByPath",
                 ],
-                "resources": ["arn:aws:ssm:*:*:parameter/openclaw-lab/*"],
+                "resources": [
+                    f"arn:aws:ssm:{aws_region}:{aws.get_caller_identity().account_id}:parameter/openclaw-lab/*"
+                ],
             }
         ],
     ).json,
@@ -252,7 +254,7 @@ subnet_in_cheapest_az = {az: subnet for az, subnet in zip(azs, subnets)}[cheapes
 spot = aws.ec2.SpotInstanceRequest(
     f"{prefix}-spot",
     ami=ami.id,
-    instance_type=ec2_instance_type,  # Suitable ARM-based instance for k3s server
+    instance_type=ec2_instance_type,  # Suitable ARM-based instance for OpenClaw Lab server
     iam_instance_profile=ec2_instance_profile.name,
     vpc_security_group_ids=[ec2_sg.id],
     subnet_id=subnet_in_cheapest_az.id,

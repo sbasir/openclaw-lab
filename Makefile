@@ -5,6 +5,7 @@ RED    := \033[0;31m
 NC     := \033[0m # No Color
 
 AWS ?= aws
+REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
 VENV_DIR ?= .venv
 
@@ -92,7 +93,7 @@ ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via S
 	@echo "📊 Monitoring bootstrap progress:"
 	@cd ec2-spot && id=$$($(PULUMI) stack output instance_id 2>/dev/null); \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
-	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(AWS_REGION)
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
 
 ##@ Helpful Commands
 
@@ -100,18 +101,18 @@ ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via S
 
 openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session Manager
 	@cd ec2-spot && \
-	id=$$(pulumi stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
-	$(AWS) ssm start-session --target $$id
+	$(AWS) ssm start-session --target $$id --region $(REGION)
 
 openclaw-gateway-session: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
 	@cd ec2-spot && \
-	id=$$(pulumi stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
-	$(AWS) ssm start-session --target $$id --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"], "localPortNumber":["18789"]}'
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"], "localPortNumber":["18789"]}' --region $(REGION)
 
 openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
-	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite
+	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
 
 aws-describe-images: ## Helpful: List available Amazon Linux 2023 AMIs
 	@$(AWS) ec2 describe-images --owners amazon \
