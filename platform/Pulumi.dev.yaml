@@ -1,0 +1,4 @@
+environment:
+  - aws-login/sofy-basir-env
+config:
+  aws:region: me-central-1
