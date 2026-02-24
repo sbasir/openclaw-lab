@@ -1,11 +1,7 @@
 name: Build and Push OpenClaw Docker Image
 
 on:
-  push:
-    paths:
-      - 'Dockerfile'
-      - '**/*.py'
-  workflow_dispatch: # Allow manual triggering of the workflow
+  workflow_dispatch:
 
 permissions:
   id-token: write  # Required for AWS OIDC
@@ -54,22 +50,29 @@ jobs:
           output-credentials: true
 
       - name: Install AWS CLI
+        if: ${{ env.ACT }} # only run under act (AWS CLI is pre-installed in GitHub-hosted runners)
         uses: unfor19/install-aws-cli-action@v1
 
       - name: Authenticate to ECR
         run: |
-          aws ecr-public get-login-password --region us-east-1 | \
-          docker login --username AWS --password-stdin public.ecr.aws
+          aws ecr get-login-password --region ${{ vars.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ steps.pulumi.outputs.ecr_repository_url }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
         run: |
           cd openclaw
-          docker build -t openclaw:latest .
+          docker buildx build --platform linux/arm64 -t openclaw:latest . --load
 
       - name: Tag image
         run: |
-          docker tag openclaw:latest ${{ steps.pulumi.outputs.ecr_repository_uri }}:latest
+          docker tag openclaw:latest ${{ steps.pulumi.outputs.ecr_repository_url }}:latest
 
       - name: Push image
         run: |
-          docker push ${{ steps.pulumi.outputs.ecr_repository_uri }}:latest
+          docker push ${{ steps.pulumi.outputs.ecr_repository_url }}:latest

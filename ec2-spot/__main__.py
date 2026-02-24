@@ -25,6 +25,13 @@ cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
 if not aws_region or aws_region == "false":
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
 
+# Reference the platform stack to get ECR repository URI
+# Assumes the platform stack has the same name as the current stack (e.g. 'dev')
+platform_stack = pulumi.StackReference(
+    f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}"
+)
+ecr_repository_uri = platform_stack.require_output("ecr_repository_uri")
+
 
 def get_cheapest_az(
     instance_type: str, region: str, product_description: str = "Linux/UNIX"
@@ -100,6 +107,13 @@ aws.iam.RolePolicyAttachment(
     f"{prefix}-cloudwatch-agent-policy",
     role=ec2_role.name,
     policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+)
+
+# Allow EC2 instance to pull from ECR (for private repository access)
+aws.iam.RolePolicyAttachment(
+    f"{prefix}-ecr-policy",
+    role=ec2_role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
 )
 
 # Custom policy for SSM Parameter Store access
@@ -260,7 +274,9 @@ spot = aws.ec2.SpotInstanceRequest(
     subnet_id=subnet_in_cheapest_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
-    user_data=build_user_data(aws_region=aws_region),
+    user_data=ecr_repository_uri.apply(
+        lambda uri: build_user_data(aws_region=aws_region, ecr_repository_uri=uri)
+    ),
     # Spot instance configuration
     spot_type="persistent",  # Keeps requesting if interrupted
     instance_interruption_behavior="stop",  # Stop instead of terminate on interruption

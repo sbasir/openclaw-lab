@@ -315,26 +315,44 @@ sts_policy = aws.iam.RolePolicy(
     ),
 )
 
-# =============================================================================
-# Public ECR Repository
-# =============================================================================
-
-# ECR Public repositories can only be created in us-east-1.
-aws_us_east_1 = aws.Provider(
-    f"{prefix}-us-east-1",
-    region="us-east-1",
+# ECR permissions: push/pull images
+ecr_policy = aws.iam.RolePolicy(
+    f"{prefix}-ecr-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "ECRPushPull",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ecr:GetAuthorizationToken",
+                        "ecr:BatchCheckLayerAvailability",
+                        "ecr:GetDownloadUrlForLayer",
+                        "ecr:BatchGetImage",
+                        "ecr:PutImage",
+                        "ecr:InitiateLayerUpload",
+                        "ecr:UploadLayerPart",
+                        "ecr:CompleteLayerUpload",
+                    ],
+                    "Resource": "*",
+                },
+            ],
+        }
+    ),
 )
 
-ecr_repo = aws.ecrpublic.Repository(
+# =============================================================================
+# Private ECR Repository
+# =============================================================================
+
+ecr_repo = aws.ecr.Repository(
     f"{prefix}-ecr",
-    repository_name="openclaw",
-    catalog_data={
-        "architectures": ["ARM"],
-        "operating_systems": ["Linux"],
-        "description": "OpenClaw Docker image",
-    },
+    name="openclaw",
+    image_tag_mutability="MUTABLE",
+    force_delete=True,
     tags={"Name": f"{prefix}-ecr"},
-    opts=pulumi.ResourceOptions(provider=aws_us_east_1),
 )
 
 # ---------------------------------------------------------------------------
@@ -343,4 +361,4 @@ ecr_repo = aws.ecrpublic.Repository(
 
 pulumi.export("github_actions_role_arn", github_actions_role.arn)
 pulumi.export("oidc_provider_arn", oidc_provider_arn)
-pulumi.export("ecr_repository_uri", ecr_repo.repository_uri)
+pulumi.export("ecr_repository_url", ecr_repo.repository_url)

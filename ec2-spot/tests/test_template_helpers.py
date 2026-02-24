@@ -14,6 +14,7 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
         "docker_compose_config": "services:\n  app:\n    image: demo/app:latest",
         "docker_compose_service": "[Unit]\nDescription=Demo Service",
         "aws_region": "ap-southeast-2",
+        "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
     }
 
     rendered = render_template("cloud-config.yaml.j2", context)
@@ -24,6 +25,10 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
     assert "metrics_collection_interval" in rendered
     assert "image: demo/app:latest" in rendered
     assert "Description=Demo Service" in rendered
+    assert (
+        "aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 123.dkr.ecr.ap-southeast-2.amazonaws.com"
+        in rendered
+    )
 
 
 def test_render_template_raises_for_missing_required_context_variable() -> None:
