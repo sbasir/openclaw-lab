@@ -1,0 +1,75 @@
+name: Build and Push OpenClaw Docker Image
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - '**/*.py'
+  workflow_dispatch: # Allow manual triggering of the workflow
+
+permissions:
+  id-token: write  # Required for AWS OIDC
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          path: repo
+
+      - name: Checkout OpenClaw repo
+        uses: actions/checkout@v6
+        with:
+          repository: openclaw/openclaw
+          ref: main
+          path: openclaw
+
+      - name: Setup Pulumi
+        uses: pulumi/actions@v6
+        with:
+          command: output
+          stack-name: dev
+          work-dir: repo/platform
+        id: pulumi
+
+      - name: Configure AWS credentials via OIDC
+        if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Configure AWS credentials (local) 
+        if: ${{ env.ACT }} # only run under act 
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          output-credentials: true
+
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+
+      - name: Authenticate to ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | \
+          docker login --username AWS --password-stdin public.ecr.aws
+
+      - name: Build Docker image
+        run: |
+          cd openclaw
+          docker build -t openclaw:latest .
+
+      - name: Tag image
+        run: |
+          docker tag openclaw:latest ${{ steps.pulumi.outputs.ecr_repository_uri }}:latest
+
+      - name: Push image
+        run: |
+          docker push ${{ steps.pulumi.outputs.ecr_repository_uri }}:latest
