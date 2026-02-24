@@ -1,0 +1,133 @@
+name: Infra Preview
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ec2-spot/**"
+      - "platform/**"
+      - ".github/workflows/infra-preview.yaml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ec2-spot/**"
+      - "platform/**"
+      - ".github/workflows/infra-preview.yaml"
+  workflow_dispatch: # Allow manual triggering of the workflow
+
+permissions:
+  id-token: write  # Required for AWS OIDC
+  contents: read
+  pull-requests: write  # To post preview comments
+
+jobs:
+  ec2-spot:
+    name: Preview EC2 Spot Infrastructure Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          working-directory: ec2-spot
+          github-token: ${{ github.token }}
+          activate-environment: true
+
+      - name: Configure AWS credentials via OIDC
+        if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Configure AWS credentials (local) 
+        if: ${{ env.ACT }} # only run under act 
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          output-credentials: true
+
+      - name: Cache Pulumi venv
+        uses: actions/cache@v5
+        with:
+          path: |
+            ec2-spot/.venv
+            ec2-spot/venv
+          key: pulumi-venv-${{ runner.os }}-${{ hashFiles('ec2-spot/pyproject.toml') }}
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}
+
+      - name: Pulumi Preview
+        uses: pulumi/actions@v6
+        with:
+          command: preview
+          stack-name: dev
+          work-dir: ec2-spot
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+  platform:
+    name: Preview Platform Infrastructure Changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          working-directory: platform
+          github-token: ${{ github.token }}
+          activate-environment: true
+
+      - name: Configure AWS credentials via OIDC
+        if: ${{ !env.ACT }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Configure AWS credentials (local) 
+        if: ${{ env.ACT }} # only run under act 
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          output-credentials: true
+
+      - name: Cache Pulumi venv
+        uses: actions/cache@v5
+        with:
+          path: | 
+            platform/.venv
+            platform/venv
+          key: pulumi-venv-${{ runner.os }}-${{ hashFiles('platform/pyproject.toml') }}
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}
+
+      - name: Pulumi Preview
+        uses: pulumi/actions@v6
+        with:
+          command: preview
+          stack-name: dev
+          work-dir: platform
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}

@@ -16,7 +16,7 @@ on:
 
 jobs:
   ec2-spot:
-    name: Ec2 Spot Lint and Test
+    name: EC2 Spot Lint and Test
     runs-on: ubuntu-latest
 
     steps:
@@ -37,7 +37,7 @@ jobs:
             ec2-spot/.venv
             ec2-spot/venv
           key: pulumi-venv-${{ runner.os }}-${{ hashFiles('ec2-spot/pyproject.toml') }}
-              
+
       - name: Cache Pulumi plugins
         uses: actions/cache@v5
         with:
@@ -48,16 +48,16 @@ jobs:
         uses: pulumi/actions@v6
         with:
           work-dir: ec2-spot
-     
+
       - name: Install dependencies
         run: make install-ec2-spot
 
-      - name: lint
+      - name: Lint
         run: make lint-ec2-spot
 
-      - name: test
+      - name: Test
         run: make test-ec2-spot
-     
+
 
   platform:
     name: Platform Lint and Test
@@ -73,7 +73,7 @@ jobs:
           working-directory: platform
           github-token: ${{ github.token }}
           activate-environment: true
-        
+
       - name: Cache Pulumi venv
         uses: actions/cache@v5
         with:
@@ -81,7 +81,7 @@ jobs:
             platform/.venv
             platform/venv
           key: pulumi-venv-${{ runner.os }}-${{ hashFiles('platform/pyproject.toml') }}
-              
+
       - name: Cache Pulumi plugins
         uses: actions/cache@v5
         with:
@@ -92,9 +92,9 @@ jobs:
         uses: pulumi/actions@v6
         with:
           work-dir: platform
-          
+
       - name: Install dependencies
         run: make install-platform
 
-      - name: lint
+      - name: Lint
         run: make lint-platform

@@ -7,12 +7,19 @@ NC     := \033[0m # No Color
 AWS ?= aws
 REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
+STACK ?= dev
 VENV_DIR ?= .venv
 
 ACT ?= act
 ACT_FLAGS ?= --platform ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-24.04-20260215 \
 	--container-architecture linux/amd64 \
 	--pull=false
+ACT_INFRA_FLAGS = -s PULUMI_ACCESS_TOKEN=$(PULUMI_ACCESS_TOKEN) \
+	-s AWS_ACCESS_KEY_ID=$$AWS_ACCESS_KEY_ID \
+	-s AWS_SECRET_ACCESS_KEY=$$AWS_SECRET_ACCESS_KEY \
+	-s AWS_SESSION_TOKEN=$$AWS_SESSION_TOKEN \
+	--var AWS_REGION=$(AWS_REGION) \
+	--input stack=$(STACK)
 
 # AUTO_APPROVE controls whether ``--yes`` is added to pulumi commands.  Set
 # it to ``true`` or ``yes`` (case-sensitive) when running in CI or any
@@ -21,6 +28,16 @@ ACT_FLAGS ?= --platform ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-24.04-2026
 AUTO_APPROVE ?= false
 # treat either "true" or "yes" (case-sensitive) as approval
 APPROVE_FLAGS := $(if $(filter $(AUTO_APPROVE),true yes),--yes,)
+
+# Auto-load a local .env file if present (convenience). `.env` should NOT be committed.
+ifneq (,$(wildcard .env))
+# Capture variables defined before loading .env
+ENV_PRE_VARS := $(.VARIABLES)
+include .env
+# Export only variables newly introduced by .env (avoid exporting all Make internals)
+ENV_NEW_VARS := $(filter-out $(ENV_PRE_VARS) MAKEFILE_LIST,$(.VARIABLES))
+export $(ENV_NEW_VARS)
+endif
 
 define print_help_section
 	@echo "$(YELLOW)$(1)$(NC)"
@@ -51,7 +68,7 @@ help: ## Show this help message
 
 ##@ Setup Commands
 
-.PHONY: install-ec2-spot install-platform install lint-ec2-spot lint-platform lint format test-ec2-spot test ci actions-lint
+.PHONY: install-ec2-spot install-platform install lint-ec2-spot lint-platform lint format test-ec2-spot test ci
 
 install-ec2-spot:
 	@echo "$(GREEN)Installing dependencies for EC2 Spot Instance...$(NC)"
@@ -139,19 +156,24 @@ platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
 	@cd platform && \
 	$(PULUMI) stack output
 
-##@ Github Actions Commands
+##@ GitHub Actions Commands
 
-.PHONY: actions-lint
+.PHONY: actions-lint gh-act-ci gh-act-infra-preview
 
 actions-lint: ## GitHub Actions: Lint GitHub Actions workflow files
+	@echo "$(GREEN)Linting GitHub Actions workflow files...$(NC)"
 	@command -v actionlint >/dev/null 2>&1 || { \
 		echo "actionlint is required to lint GitHub Actions workflows. Install actionlint (e.g., 'brew install actionlint')"; \
 		exit 1; \
 	};
 	@actionlint .github/workflows/*.yaml
+	@echo "$(GREEN)GitHub Actions workflow files linted successfully!$(NC)"
 
 gh-act-ci: ## GitHub Actions: Run CI workflow locally using act
 	@$(ACT) -W .github/workflows/ci.yaml $(ACT_FLAGS)
+
+gh-act-infra-preview: ## GitHub Actions: Run Infra Preview workflow locally using act
+	@$(ACT) -W .github/workflows/infra-preview.yaml $(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 ##@ Helpful Commands
 
