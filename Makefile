@@ -4,6 +4,8 @@ YELLOW := \033[1;33m
 RED    := \033[0;31m
 NC     := \033[0m # No Color
 
+AWS ?= aws
+REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
 VENV_DIR ?= .venv
 
@@ -39,6 +41,7 @@ help: ## Show this help message
 	@echo ""
 	$(call print_help_section,Setup Commands:,Setup:)
 	$(call print_help_section,Infrastructure Commands:,Infra:)
+	$(call print_help_section,Helpful Commands:,Helpful:)
 
 ##@ Setup Commands
 
@@ -68,7 +71,7 @@ ci: install lint format test ## Setup: Run CI checks (lint, format, test)
 
 ##@ Infra Commands
 
-.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output
+.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-deploy-logs
 
 ec2-spot-preview: ## Infra: EC2 Spot Instance - Preview changes
 	@echo "$(GREEN)Previewing EC2 Spot Instance deployment...$(NC)"
@@ -85,3 +88,33 @@ ec2-spot-destroy: ## Infra: EC2 Spot Instance - Destroy infrastructure
 ec2-spot-output: ## Infra: EC2 Spot Instance - Show stack output
 	@cd ec2-spot && \
 	$(PULUMI) stack output
+
+ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via SSM Session Manager
+	@echo "📊 Monitoring bootstrap progress:"
+	@cd ec2-spot && id=$$($(PULUMI) stack output instance_id 2>/dev/null); \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
+
+##@ Helpful Commands
+
+.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter
+
+openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session Manager
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --region $(REGION)
+
+openclaw-gateway-session: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"], "localPortNumber":["18789"]}' --region $(REGION)
+
+openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
+	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
+
+aws-describe-images: ## Helpful: List available Amazon Linux 2023 AMIs
+	@$(AWS) ec2 describe-images --owners amazon \
+	  --filters "Name=name,Values=al2023-ami-2023*-arm64" \
+	  --query 'Images[?contains(Name, `ecs`)==`false`].[CreationDate,Name,ImageId]' --output text | sort

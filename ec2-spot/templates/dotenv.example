@@ -1,0 +1,11 @@
+OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:main
+# Example only. Replace with a strong, secret token for production use.
+OPENCLAW_GATEWAY_TOKEN=REPLACE_WITH_SECURE_GATEWAY_TOKEN
+OPENCLAW_GATEWAY_BIND=lan
+OPENCLAW_GATEWAY_PORT=18789
+
+OPENCLAW_CONFIG_DIR=/home/ec2-user/.openclaw
+OPENCLAW_WORKSPACE_DIR=/home/ec2-user/.openclaw/workspace
+
+# Example only. Replace with a strong, secret password for production use.
+GOG_KEYRING_PASSWORD=REPLACE_WITH_SECURE_GOG_KEYRING_PASSWORD

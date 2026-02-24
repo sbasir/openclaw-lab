@@ -1,1 +1,2 @@
-{}
+config:
+  openclaw-lab:ami: ami-076988f456083409b

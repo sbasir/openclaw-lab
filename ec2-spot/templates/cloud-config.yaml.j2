@@ -1,0 +1,88 @@
+#cloud-config
+package_update: true
+packages:
+  - jq
+  - docker
+  - git
+  - awscli
+  - amazon-cloudwatch-agent
+
+# 1. Files to be created on the instance
+write_files:
+  - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
+    owner: root:root
+    permissions: '0644'
+    content: |
+      {{ cloudwatch_agent_config | indent(width=6) }}
+
+  - path: /home/ec2-user/docker-compose.yaml
+    owner: ec2-user:ec2-user
+    permissions: '0644'
+    defer: true
+    content: |
+      {{ docker_compose_config | indent(width=6) }}
+
+  - path: /etc/systemd/system/docker-compose.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      {{ docker_compose_service | indent(width=6) }}
+
+# 2. Commands to run after files are written
+runcmd:
+  - usermod -a -G docker ec2-user
+
+  # Install Docker Compose Binary
+  # We use the variables passed from Pulumi/Python
+  - |
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    CUR_ARCH=$(uname -m)
+    COMPOSE_URL="https://github.com/docker/compose/releases/download/{{ compose_version }}/docker-compose-linux-$CUR_ARCH"
+    curl -sfL "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose || { echo "Failed to download docker-compose from $COMPOSE_URL" >&2; exit 1; }
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+  - |
+    mkdir -p /home/ec2-user/.openclaw/workspace
+    chmod 700 /home/ec2-user/.openclaw
+    chmod 700 /home/ec2-user/.openclaw/workspace
+    echo '{}' > /home/ec2-user/.openclaw/openclaw.json
+    chmod 600 /home/ec2-user/.openclaw/openclaw.json
+    chown -R 1000:1000 /home/ec2-user/.openclaw
+
+  - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
+
+  - |
+    ENV_FILE="/home/ec2-user/.env"
+    TMP_ENV_FILE="${ENV_FILE}.tmp"
+
+    # Retrieve dotenv contents from SSM Parameter Store into a temporary file
+    aws ssm get-parameter \
+      --name '/openclaw-lab/dotenv' \
+      --with-decryption \
+      --region {{ aws_region }} \
+      --query 'Parameter.Value' \
+      --output text > "$TMP_ENV_FILE"
+
+    if [ $? -ne 0 ]; then
+      echo "ERROR: Failed to retrieve SSM parameter '/openclaw-lab/dotenv'. Check IAM permissions, region, and parameter existence." >&2
+      rm -f "$TMP_ENV_FILE"
+      exit 1
+    fi
+
+    if [ ! -s "$TMP_ENV_FILE" ]; then
+      echo "ERROR: Retrieved SSM parameter '/openclaw-lab/dotenv' is empty. Refusing to overwrite $ENV_FILE." >&2
+      rm -f "$TMP_ENV_FILE"
+      exit 1
+    fi
+
+    mv "$TMP_ENV_FILE" "$ENV_FILE"
+    chown ec2-user:ec2-user "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    chmod 600 /home/ec2-user/.env
+
+  # Start Docker service
+  - systemctl enable docker.service
+  - systemctl start docker.service
+  - systemctl enable docker-compose.service
+  - systemctl start docker-compose.service

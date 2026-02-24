@@ -8,6 +8,8 @@ from network_helpers import (
     ipv6_subnets_cidrs,
 )
 
+from user_data import build_user_data
+
 prefix = "openclaw-lab"
 config = pulumi.Config()
 
@@ -100,6 +102,26 @@ aws.iam.RolePolicyAttachment(
     policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
 )
 
+# Custom policy for SSM Parameter Store access
+aws.iam.RolePolicy(
+    f"{prefix}-parameter-store-policy",
+    role=ec2_role.name,
+    policy=aws.iam.get_policy_document(
+        statements=[
+            {
+                "actions": [
+                    "ssm:GetParameter",
+                    "ssm:GetParameters",
+                    "ssm:GetParametersByPath",
+                ],
+                "resources": [
+                    f"arn:aws:ssm:{aws_region}:{aws.get_caller_identity().account_id}:parameter/openclaw-lab/*"
+                ],
+            }
+        ],
+    ).json,
+)
+
 # Instance Profile to attach the role to EC2
 ec2_instance_profile = aws.iam.InstanceProfile(
     f"{prefix}-instance-profile",
@@ -162,9 +184,11 @@ def create_public_subnet(
 azs = aws.get_availability_zones(region=aws_region).names
 ipv4_cidrs = ipv4_subnets_cidrs(cidr_block, len(azs))
 ipv6_cidrs = ipv6_subnets_cidrs(vpc.ipv6_cidr_block, len(azs))
+subnets: list[aws.ec2.Subnet] = []
 
 for az, ipv4_cidr, ipv6_cidr in zip(azs, ipv4_cidrs, ipv6_cidrs):
     subnet = create_public_subnet(az, ipv4_cidr, ipv6_cidr)
+    subnets.append(subnet)
     aws.ec2.RouteTableAssociation(
         f"{prefix}-public-subnet-{az}-association",
         subnet_id=subnet.id,
@@ -201,4 +225,103 @@ aws.ec2.SecurityGroupRule(
     ipv6_cidr_blocks=["::/0"],
     security_group_id=ec2_sg.id,
     description="Allow all outbound traffic (IPv6)",
+)
+
+# -----------------------------------------------------------------------------
+# EC2 Spot Instance for OpenClaw Lab Server
+# -----------------------------------------------------------------------------
+
+if ami_override:
+    ami = aws.ec2.get_ami(
+        filters=[{"name": "image-id", "values": [ami_override]}],
+    )
+else:
+    ami = aws.ec2.get_ami(
+        most_recent=True,
+        owners=["amazon"],
+        filters=[
+            {"name": "name", "values": ["al2023-ami-2023*-arm64"]},
+            {"name": "virtualization-type", "values": ["hvm"]},
+            {"name": "root-device-type", "values": ["ebs"]},
+            {"name": "architecture", "values": ["arm64"]},
+        ],
+    )
+
+
+subnet_in_cheapest_az = {az: subnet for az, subnet in zip(azs, subnets)}[cheapest_az]
+
+# Create the Spot Instance Request
+spot = aws.ec2.SpotInstanceRequest(
+    f"{prefix}-spot",
+    ami=ami.id,
+    instance_type=ec2_instance_type,  # Suitable ARM-based instance for OpenClaw Lab server
+    iam_instance_profile=ec2_instance_profile.name,
+    vpc_security_group_ids=[ec2_sg.id],
+    subnet_id=subnet_in_cheapest_az.id,
+    associate_public_ip_address=True,
+    ipv6_address_count=1,
+    user_data=build_user_data(aws_region=aws_region),
+    # Spot instance configuration
+    spot_type="persistent",  # Keeps requesting if interrupted
+    instance_interruption_behavior="stop",  # Stop instead of terminate on interruption
+    wait_for_fulfillment=True,  # Wait for the spot request to be fulfilled
+    # Use standard credit mode to avoid burst charges
+    credit_specification={"cpu_credits": "standard"},
+    # Metadata options for IMDSv2 (more secure)
+    metadata_options={
+        "http_endpoint": "enabled",
+        "http_tokens": "required",  # Require IMDSv2
+        "http_put_response_hop_limit": 1,
+    },
+    # Root volume configuration
+    root_block_device={
+        "volume_type": "gp3",
+        "volume_size": 8,
+        "delete_on_termination": True,
+        "encrypted": True,
+    },
+    tags={
+        "Name": f"{prefix}-spot",
+        "Purpose": "OpenClaw Lab Server",
+    },
+)
+
+aws.ec2.Tag(
+    f"{prefix}-spot-name-tag",
+    resource_id=spot.spot_instance_id,
+    key="Name",
+    value=f"{prefix}-spot-instance",
+    opts=pulumi.ResourceOptions(depends_on=[spot]),
+)
+
+# Allocate an Elastic IP so the public IP remains stable across reboots.
+ec2_eip = aws.ec2.Eip(
+    f"{prefix}-eip",
+    domain="vpc",
+    instance=spot.spot_instance_id,
+    opts=pulumi.ResourceOptions(depends_on=[igw]),
+    tags={"Name": f"{prefix}-eip"},
+)
+
+# Associate the EIP with the Spot Instance when the instance ID is ready.
+aws.ec2.EipAssociation(
+    f"{prefix}-eip-assoc",
+    instance_id=spot.spot_instance_id,
+    allocation_id=ec2_eip.allocation_id,
+)
+
+# Export useful information
+pulumi.export("ami_id", ami.id)
+pulumi.export("ami_name", ami.name)
+pulumi.export("instance_id", spot.spot_instance_id)
+pulumi.export("public_ip", ec2_eip.public_ip)
+pulumi.export("spot_request_id", spot.id)
+pulumi.export("iam_role_arn", ec2_role.arn)
+
+# SSM Session Manager connect command
+pulumi.export(
+    "ssm_connect_command",
+    spot.spot_instance_id.apply(
+        lambda id: f"aws ssm start-session --target {id} --region {aws_region}"
+    ),
 )
