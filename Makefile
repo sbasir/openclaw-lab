@@ -9,6 +9,11 @@ REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
 VENV_DIR ?= .venv
 
+ACT ?= act
+ACT_FLAGS ?= --platform ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-24.04-20260215 \
+	--container-architecture linux/amd64 \
+	--pull=false
+
 # AUTO_APPROVE controls whether ``--yes`` is added to pulumi commands.  Set
 # it to ``true`` or ``yes`` (case-sensitive) when running in CI or any
 # non-interactive context; the default is ``false`` which leaves Pulumi in
@@ -41,23 +46,38 @@ help: ## Show this help message
 	@echo ""
 	$(call print_help_section,Setup Commands:,Setup:)
 	$(call print_help_section,Infrastructure Commands:,Infra:)
+	$(call print_help_section,GitHub Actions Commands:,GitHub Actions:)
 	$(call print_help_section,Helpful Commands:,Helpful:)
 
 ##@ Setup Commands
 
-.PHONY: install lint format test ci
+.PHONY: install-ec2-spot install-platform install lint-ec2-spot lint-platform lint format test-ec2-spot test ci actions-lint
 
-install: ## Setup: Install all dependencies
-	@echo "$(GREEN)Installing dependencies...$(NC)"
+install-ec2-spot:
+	@echo "$(GREEN)Installing dependencies for EC2 Spot Instance...$(NC)"
 	@cd ec2-spot && $(PULUMI) install
+
+install-platform:
+	@echo "$(GREEN)Installing dependencies for Platform...$(NC)"
 	@cd platform && $(PULUMI) install
 
-lint: ## Setup: Lint the code
-	@echo "$(GREEN)Linting the code...$(NC)"
+install: ## Setup: Install all dependencies
+	$(MAKE) install-ec2-spot
+	$(MAKE) install-platform
+
+lint-ec2-spot:
+	@echo "$(GREEN)Linting EC2 Spot Instance code...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/ruff check .
+
+lint-platform:
+	@echo "$(GREEN)Linting Platform code...$(NC)"
 	@cd platform && \
 	$(VENV_DIR)/bin/ruff check .
+
+lint: ## Setup: Lint the code
+	$(MAKE) lint-ec2-spot
+	$(MAKE) lint-platform
 
 format: ## Setup: Format the code
 	@echo "$(GREEN)Formatting the code...$(NC)"
@@ -66,11 +86,14 @@ format: ## Setup: Format the code
 	@cd platform && \
 	$(VENV_DIR)/bin/ruff format .
 
-test: ## Setup: Run tests
-	@echo "$(GREEN)Running tests...$(NC)"
+test-ec2-spot:
+	@echo "$(GREEN)Running tests for EC2 Spot Instance...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/python -m pytest -q
-	
+
+test: ## Setup: Run tests
+	$(MAKE) test-ec2-spot
+
 ci: install lint format test ## Setup: Run CI checks (lint, format, test)
 	@echo "$(GREEN)CI checks passed!$(NC)"
 
@@ -115,6 +138,20 @@ platform-destroy: ## Infra: Platform (OIDC, ECR) - Destroy infrastructure
 platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
 	@cd platform && \
 	$(PULUMI) stack output
+
+##@ Github Actions Commands
+
+.PHONY: actions-lint
+
+actions-lint: ## GitHub Actions: Lint GitHub Actions workflow files
+	@command -v actionlint >/dev/null 2>&1 || { \
+		echo "actionlint is required to lint GitHub Actions workflows. Install actionlint (e.g., 'brew install actionlint')"; \
+		exit 1; \
+	};
+	@actionlint .github/workflows/*.yaml
+
+gh-act-ci: ## GitHub Actions: Run CI workflow locally using act
+	@$(ACT) -W .github/workflows/ci.yaml $(ACT_FLAGS)
 
 ##@ Helpful Commands
 

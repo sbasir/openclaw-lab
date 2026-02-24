@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ec2-spot/**"
+      - "platform/**"
+      - ".github/workflows/ci.yaml"
+  pull_request:
+    paths:
+      - "ec2-spot/**"
+      - "platform/**"
+      - ".github/workflows/ci.yaml"
+
+jobs:
+  ec2-spot:
+    name: Ec2 Spot Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          working-directory: ec2-spot
+          github-token: ${{ github.token }}
+          activate-environment: true
+
+      - name: Cache Pulumi venv
+        uses: actions/cache@v5
+        with:
+          path: | 
+            ec2-spot/.venv
+            ec2-spot/venv
+          key: pulumi-venv-${{ runner.os }}-${{ hashFiles('ec2-spot/pyproject.toml') }}
+              
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v6
+        with:
+          work-dir: ec2-spot
+     
+      - name: Install dependencies
+        run: make install-ec2-spot
+
+      - name: lint
+        run: make lint-ec2-spot
+
+      - name: test
+        run: make test-ec2-spot
+     
+
+  platform:
+    name: Platform Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          working-directory: platform
+          github-token: ${{ github.token }}
+          activate-environment: true
+        
+      - name: Cache Pulumi venv
+        uses: actions/cache@v5
+        with:
+          path: | 
+            platform/.venv
+            platform/venv
+          key: pulumi-venv-${{ runner.os }}-${{ hashFiles('platform/pyproject.toml') }}
+              
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v5
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v6
+        with:
+          work-dir: platform
+          
+      - name: Install dependencies
+        run: make install-platform
+
+      - name: lint
+        run: make lint-platform
