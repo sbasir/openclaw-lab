@@ -1,0 +1,12 @@
+name: openclaw-platform
+description: Platform resources (GitHub OIDC role, ECR) for openclaw-lab
+runtime:
+  name: python
+  options:
+    toolchain: uv
+    typechecker: mypy
+    virtualenv: .venv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-python

@@ -50,15 +50,20 @@ help: ## Show this help message
 install: ## Setup: Install all dependencies
 	@echo "$(GREEN)Installing dependencies...$(NC)"
 	@cd ec2-spot && $(PULUMI) install
+	@cd platform && $(PULUMI) install
 
 lint: ## Setup: Lint the code
 	@echo "$(GREEN)Linting the code...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/ruff check .
+	@cd platform && \
+	$(VENV_DIR)/bin/ruff check .
 
 format: ## Setup: Format the code
 	@echo "$(GREEN)Formatting the code...$(NC)"
 	@cd ec2-spot && \
+	$(VENV_DIR)/bin/ruff format .
+	@cd platform && \
 	$(VENV_DIR)/bin/ruff format .
 
 test: ## Setup: Run tests
@@ -71,7 +76,7 @@ ci: install lint format test ## Setup: Run CI checks (lint, format, test)
 
 ##@ Infra Commands
 
-.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-deploy-logs
+.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-deploy-logs platform-preview platform-up platform-destroy platform-output
 
 ec2-spot-preview: ## Infra: EC2 Spot Instance - Preview changes
 	@echo "$(GREEN)Previewing EC2 Spot Instance deployment...$(NC)"
@@ -94,6 +99,22 @@ ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via S
 	@cd ec2-spot && id=$$($(PULUMI) stack output instance_id 2>/dev/null); \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
+
+platform-preview: ## Infra: Platform (OIDC, ECR) - Preview changes
+	@echo "$(GREEN)Previewing Platform deployment...$(NC)"
+	@cd platform && $(PULUMI) preview
+
+platform-up: ## Infra: Platform (OIDC, ECR) - Deploy infrastructure
+	@echo "$(GREEN)Deploying Platform infrastructure...$(NC)"
+	@cd platform && $(PULUMI) up $(APPROVE_FLAGS)
+
+platform-destroy: ## Infra: Platform (OIDC, ECR) - Destroy infrastructure
+	@echo "$(GREEN)Destroying Platform infrastructure...$(NC)"
+	@cd platform && $(PULUMI) destroy $(APPROVE_FLAGS)
+
+platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
+	@cd platform && \
+	$(PULUMI) stack output
 
 ##@ Helpful Commands
 
