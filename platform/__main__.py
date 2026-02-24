@@ -228,6 +228,31 @@ iam_policy = aws.iam.RolePolicy(
     ),
 )
 
+# OIDC permissions: allow listing the OIDC provider.
+# This is needed by the Pulumi GitHub OIDC provider to verify the provider exists and get its ARN.
+# Note it only applies once the role is created manually, as Github Actions
+# needs to assume the role to get these permissions, so it can't be used to create the role in the first place.
+iam_oidc_policy = aws.iam.RolePolicy(
+    f"{prefix}-iam-oidc-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "IAMRoleForOIDC",
+                    "Effect": "Allow",
+                    "Action": [
+                        "iam:GetOpenIDConnectProvider",
+                        "iam:ListOpenIDConnectProviders",
+                    ],
+                    "Resource": f"arn:aws:iam::{account_id}:oidc-provider/*",
+                },
+            ],
+        }
+    ),
+)
+
 # SSM permissions: parameter store access and send-command for deployments.
 ssm_policy = aws.iam.RolePolicy(
     f"{prefix}-ssm-policy",

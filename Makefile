@@ -7,7 +7,19 @@ NC     := \033[0m # No Color
 AWS ?= aws
 REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
+STACK ?= dev
 VENV_DIR ?= .venv
+
+ACT ?= act
+ACT_FLAGS ?= --platform ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-24.04-20260215 \
+	--container-architecture linux/amd64 \
+	--pull=false
+ACT_INFRA_FLAGS = -s PULUMI_ACCESS_TOKEN=$(PULUMI_ACCESS_TOKEN) \
+	-s AWS_ACCESS_KEY_ID=$$AWS_ACCESS_KEY_ID \
+	-s AWS_SECRET_ACCESS_KEY=$$AWS_SECRET_ACCESS_KEY \
+	-s AWS_SESSION_TOKEN=$$AWS_SESSION_TOKEN \
+	--var AWS_REGION=$(AWS_REGION) \
+	--input stack=$(STACK)
 
 # AUTO_APPROVE controls whether ``--yes`` is added to pulumi commands.  Set
 # it to ``true`` or ``yes`` (case-sensitive) when running in CI or any
@@ -16,6 +28,16 @@ VENV_DIR ?= .venv
 AUTO_APPROVE ?= false
 # treat either "true" or "yes" (case-sensitive) as approval
 APPROVE_FLAGS := $(if $(filter $(AUTO_APPROVE),true yes),--yes,)
+
+# Auto-load a local .env file if present (convenience). `.env` should NOT be committed.
+ifneq (,$(wildcard .env))
+# Capture variables defined before loading .env
+ENV_PRE_VARS := $(.VARIABLES)
+include .env
+# Export only variables newly introduced by .env (avoid exporting all Make internals)
+ENV_NEW_VARS := $(filter-out $(ENV_PRE_VARS) MAKEFILE_LIST,$(.VARIABLES))
+export $(ENV_NEW_VARS)
+endif
 
 define print_help_section
 	@echo "$(YELLOW)$(1)$(NC)"
@@ -41,23 +63,38 @@ help: ## Show this help message
 	@echo ""
 	$(call print_help_section,Setup Commands:,Setup:)
 	$(call print_help_section,Infrastructure Commands:,Infra:)
+	$(call print_help_section,GitHub Actions Commands:,GitHub Actions:)
 	$(call print_help_section,Helpful Commands:,Helpful:)
 
 ##@ Setup Commands
 
-.PHONY: install lint format test ci
+.PHONY: install-ec2-spot install-platform install lint-ec2-spot lint-platform lint format test-ec2-spot test ci
 
-install: ## Setup: Install all dependencies
-	@echo "$(GREEN)Installing dependencies...$(NC)"
+install-ec2-spot:
+	@echo "$(GREEN)Installing dependencies for EC2 Spot Instance...$(NC)"
 	@cd ec2-spot && $(PULUMI) install
+
+install-platform:
+	@echo "$(GREEN)Installing dependencies for Platform...$(NC)"
 	@cd platform && $(PULUMI) install
 
-lint: ## Setup: Lint the code
-	@echo "$(GREEN)Linting the code...$(NC)"
+install: ## Setup: Install all dependencies
+	$(MAKE) install-ec2-spot
+	$(MAKE) install-platform
+
+lint-ec2-spot:
+	@echo "$(GREEN)Linting EC2 Spot Instance code...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/ruff check .
+
+lint-platform:
+	@echo "$(GREEN)Linting Platform code...$(NC)"
 	@cd platform && \
 	$(VENV_DIR)/bin/ruff check .
+
+lint: ## Setup: Lint the code
+	$(MAKE) lint-ec2-spot
+	$(MAKE) lint-platform
 
 format: ## Setup: Format the code
 	@echo "$(GREEN)Formatting the code...$(NC)"
@@ -66,11 +103,14 @@ format: ## Setup: Format the code
 	@cd platform && \
 	$(VENV_DIR)/bin/ruff format .
 
-test: ## Setup: Run tests
-	@echo "$(GREEN)Running tests...$(NC)"
+test-ec2-spot:
+	@echo "$(GREEN)Running tests for EC2 Spot Instance...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/python -m pytest -q
-	
+
+test: ## Setup: Run tests
+	$(MAKE) test-ec2-spot
+
 ci: install lint format test ## Setup: Run CI checks (lint, format, test)
 	@echo "$(GREEN)CI checks passed!$(NC)"
 
@@ -115,6 +155,25 @@ platform-destroy: ## Infra: Platform (OIDC, ECR) - Destroy infrastructure
 platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
 	@cd platform && \
 	$(PULUMI) stack output
+
+##@ GitHub Actions Commands
+
+.PHONY: actions-lint gh-act-ci gh-act-infra-preview
+
+actions-lint: ## GitHub Actions: Lint GitHub Actions workflow files
+	@echo "$(GREEN)Linting GitHub Actions workflow files...$(NC)"
+	@command -v actionlint >/dev/null 2>&1 || { \
+		echo "actionlint is required to lint GitHub Actions workflows. Install actionlint (e.g., 'brew install actionlint')"; \
+		exit 1; \
+	};
+	@actionlint .github/workflows/*.yaml
+	@echo "$(GREEN)GitHub Actions workflow files linted successfully!$(NC)"
+
+gh-act-ci: ## GitHub Actions: Run CI workflow locally using act
+	@$(ACT) -W .github/workflows/ci.yaml $(ACT_FLAGS)
+
+gh-act-infra-preview: ## GitHub Actions: Run Infra Preview workflow locally using act
+	@$(ACT) -W .github/workflows/infra-preview.yaml $(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 ##@ Helpful Commands
 
