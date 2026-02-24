@@ -16,7 +16,13 @@ config = pulumi.Config()
 
 # GitHub repository that is allowed to assume the deploy role.
 # Configurable so forks can override it.
-github_repo = config.get("github_repo") or "sbasir/openclaw-lab"
+# pulumi config set github_repo sbasir/openclaw-lab
+github_repo = config.get("github_repo")
+
+if not github_repo:
+    raise ValueError(
+        "github_repo config value is required (e.g. 'sbasir/openclaw-lab')"
+    )
 
 account_id = aws.get_caller_identity().account_id
 
