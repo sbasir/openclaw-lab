@@ -10,3 +10,17 @@ dependencies = [
     "pytest>=9.0.2",
     "ruff>=0.15.2",
 ]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+exclude_gitignore = true
+exclude = [
+    'venv', 
+    '__pycache__', 
+    '\.pytest_cache', 
+    '\.mypy_cache', 
+    '\.ruff_cache', 
+    '\.venv'
+]
+files = ["*.py", "tests/*.py"]

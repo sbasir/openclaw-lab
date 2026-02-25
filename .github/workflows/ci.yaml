@@ -55,6 +55,9 @@ jobs:
       - name: Lint
         run: make lint-ec2-spot
 
+      - name: Static Type Check
+        run: make mypy-ec2-spot
+
       - name: Test
         run: make test-ec2-spot
 
@@ -98,3 +101,6 @@ jobs:
 
       - name: Lint
         run: make lint-platform
+
+      - name: Static Type Check
+        run: make mypy-platform

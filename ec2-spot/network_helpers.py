@@ -16,8 +16,11 @@ import ipaddress
 from typing import Any, Optional
 
 
+IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
 def _validate_subnet_request(
-    network: ipaddress._BaseNetwork, subnet_count: int, subnet_prefix: int
+    network: IpNetwork, subnet_count: int, subnet_prefix: int
 ) -> None:
     if subnet_count <= 0:
         raise ValueError(f"subnet_count must be greater than 0, got: {subnet_count}")
