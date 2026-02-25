@@ -12,6 +12,7 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
         "compose_version": "v9.9.9",
         "cloudwatch_agent_config": '{"agent":{"metrics_collection_interval":60}}',
         "docker_compose_config": "services:\n  app:\n    image: demo/app:latest",
+        "auto_approve_devices_script": "#!/bin/bash\necho 'test script'",
         "openclaw_service": "[Unit]\nDescription=Demo Service",
         "aws_region": "ap-southeast-2",
         "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
@@ -26,6 +27,7 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
     assert "metrics_collection_interval" in rendered
     assert "image: demo/app:latest" in rendered
     assert "Description=Demo Service" in rendered
+    assert "echo 'test script'" in rendered
 
 
 def test_render_template_raises_for_missing_required_context_variable() -> None:

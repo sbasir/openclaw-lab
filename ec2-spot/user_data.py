@@ -51,6 +51,7 @@ def build_user_data(
         "compose_version": DEFAULT_COMPOSE_VERSION,
         "cloudwatch_agent_config": load_template_source("cloudwatch-agent-config.json"),
         "docker_compose_config": load_template_source("docker-compose.yaml"),
+        "auto_approve_devices_script": load_template_source("auto-approve-devices.sh"),
         "openclaw_service": render_template("openclaw-service.conf", service_context),
         "aws_region": aws_region,
         "ecr_registry_domain": registry_domain,

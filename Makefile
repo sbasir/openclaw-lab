@@ -258,6 +258,26 @@ openclaw-gateway-session: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot In
 openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
 	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
 
+openclaw-cli: ## Helpful: Run OpenClaw CLI commands on the EC2 Spot Instance
+	@if [ -z "$$COMMAND" ]; then \
+		echo "Usage: make openclaw-cli COMMAND=\"<command>\""; \
+		echo "Example: make openclaw-cli COMMAND=\"devices list\""; \
+		exit 1; \
+	fi
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['cd /opt/openclaw && sudo docker compose run --rm openclaw-cli $$COMMAND']" --region $(REGION)
+
+openclaw-devices-list: ## Helpful: List pending OpenClaw device pairing requests
+	@$(MAKE) openclaw-cli COMMAND="devices list"
+
+openclaw-devices-approve-all: ## Helpful: Auto-approve all pending OpenClaw device pairing requests
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw']" --region $(REGION)
+
 aws-describe-images: ## Helpful: List available Amazon Linux 2023 AMIs
 	@$(AWS) ec2 describe-images --owners amazon \
 	  --filters "Name=name,Values=al2023-ami-2023*-arm64" \

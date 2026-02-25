@@ -58,6 +58,46 @@ write_files:
     content: |
       {{ openclaw_service | indent(width=6) }}
 
+  - path: /opt/openclaw/auto-approve-devices.sh
+    owner: ec2-user:ec2-user
+    permissions: '0755'
+    content: |
+      {{ auto_approve_devices_script | indent(width=6) }}
+
+  - path: /etc/systemd/system/openclaw-auto-approve.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=OpenClaw Device Pairing Auto-Approval
+      After=openclaw.service
+      Requires=openclaw.service docker.service
+      
+      [Service]
+      Type=oneshot
+      User=ec2-user
+      ExecStart=/opt/openclaw/auto-approve-devices.sh /opt/openclaw
+      SyslogIdentifier=openclaw-auto-approve
+      
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-auto-approve.timer
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Run OpenClaw Device Pairing Auto-Approval Every Minute
+      Requires=openclaw-auto-approve.service
+      
+      [Timer]
+      OnBootSec=10s
+      OnUnitActiveSec=1min
+      Persistent=true
+      
+      [Install]
+      WantedBy=timers.target
+
 # 2. Commands to run after files are written
 runcmd:
   - usermod -a -G docker ec2-user
@@ -101,3 +141,10 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable openclaw.service
   - systemctl start openclaw.service
+  # Auto-approve any pending device pairing requests (safe in dev environment with local-only SSH access)
+  - sleep 5
+  - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
+
+  # Enable periodic auto-approval of device pairing requests (runs every minute)
+  - systemctl enable openclaw-auto-approve.timer
+  - systemctl start openclaw-auto-approve.timer
