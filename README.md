@@ -55,9 +55,7 @@ make ec2-spot-output
 ## Development Commands
 
 ```bash
-make lint
-make test
-make format
+make ci         # Run all CI checks (lint, mypy, format, test)
 ```
 
 You can inspect all available commands with:
