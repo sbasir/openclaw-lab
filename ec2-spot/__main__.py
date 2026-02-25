@@ -20,6 +20,12 @@ ami_override = config.get("ami")
 ec2_instance_type = config.get("instance_type") or "t4g.small"  # 2 VCPUs, 2 GB RAM
 # set via: pulumi config set cidr_block 10.0.0.0/16 --stack dev
 cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
+# set via: pulumi config set data_volume_size_gib 20 --stack dev
+data_volume_size_gib = int(config.get("data_volume_size_gib") or "20")
+# set via: pulumi config set data_device_name /dev/sdf --stack dev
+data_device_name = config.get("data_device_name") or "/dev/sdf"
+# set via: pulumi config set data_volume_snapshot_id snap-0123456789abcdef0 --stack dev
+data_volume_snapshot_id = config.get("data_volume_snapshot_id")
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
@@ -277,7 +283,11 @@ spot = aws.ec2.SpotInstanceRequest(
     associate_public_ip_address=True,
     ipv6_address_count=1,
     user_data=ecr_repository_url.apply(
-        lambda url: build_user_data(aws_region=aws_region, ecr_repository_url=url)
+        lambda url: build_user_data(
+            aws_region=aws_region,
+            ecr_repository_url=url,
+            openclaw_data_device_name=data_device_name,
+        )
     ),
     # Spot instance configuration
     spot_type="persistent",  # Keeps requesting if interrupted
@@ -302,6 +312,29 @@ spot = aws.ec2.SpotInstanceRequest(
         "Name": f"{prefix}-spot",
         "Purpose": "OpenClaw Lab Server",
     },
+)
+
+data_volume = aws.ebs.Volume(
+    f"{prefix}-data-volume",
+    availability_zone=cheapest_az,
+    size=data_volume_size_gib,
+    type="gp3",
+    encrypted=True,
+    snapshot_id=data_volume_snapshot_id,
+    tags={
+        "Name": f"{prefix}-data-volume",
+        "Purpose": "OpenClaw Persistent Data",
+    },
+    opts=pulumi.ResourceOptions(retain_on_delete=True),
+)
+
+aws.ec2.VolumeAttachment(
+    f"{prefix}-data-volume-attachment",
+    device_name=data_device_name,
+    volume_id=data_volume.id,
+    instance_id=spot.spot_instance_id,
+    stop_instance_before_detaching=True,
+    opts=pulumi.ResourceOptions(depends_on=[spot, data_volume]),
 )
 
 aws.ec2.Tag(
@@ -335,6 +368,8 @@ pulumi.export("instance_id", spot.spot_instance_id)
 pulumi.export("public_ip", ec2_eip.public_ip)
 pulumi.export("spot_request_id", spot.id)
 pulumi.export("iam_role_arn", ec2_role.arn)
+pulumi.export("data_volume_id", data_volume.id)
+pulumi.export("data_volume_device_name", data_device_name)
 
 # SSM Session Manager connect command
 pulumi.export(

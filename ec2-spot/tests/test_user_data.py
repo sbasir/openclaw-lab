@@ -16,11 +16,12 @@ def test_build_user_data_renders_cloud_config(aws_region: str) -> None:
     user_data = build_user_data(aws_region=aws_region, ecr_repository_url=ecr_uri)
 
     assert user_data.startswith("#cloud-config")
-    assert "/home/ec2-user/docker-compose.yaml" in user_data
-    assert "/etc/systemd/system/docker-compose.service" in user_data
-    assert "/home/ec2-user/.env" in user_data
-    assert "systemctl enable docker-compose.service" in user_data
-    assert "systemctl start docker-compose.service" in user_data
+    assert "/opt/openclaw/docker-compose.yaml" in user_data
+    assert "/etc/systemd/system/openclaw.service" in user_data
+    assert "/opt/openclaw/.env" in user_data
+    assert "systemctl enable openclaw.service" in user_data
+    assert "systemctl start openclaw.service" in user_data
+    assert "aws ecr get-login-password --region" in user_data
     assert (
         "docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com"
         in user_data
@@ -68,6 +69,16 @@ def test_build_user_data_requires_aws_region() -> None:
     """Ensure aws_region argument is required by the function signature."""
     with pytest.raises(TypeError):
         build_user_data()  # type: ignore[call-arg]
+
+
+def test_build_user_data_includes_data_device_name() -> None:
+    user_data = build_user_data(
+        aws_region="us-east-1",
+        ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
+        openclaw_data_device_name="/dev/sdg",
+    )
+
+    assert 'OPENCLAW_DATA_DEVICE="/dev/sdg"' in user_data
 
 
 def test_extract_ecr_registry_domain_returns_registry_part() -> None:

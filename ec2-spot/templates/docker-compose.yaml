@@ -3,7 +3,7 @@ services:
     image: ${OPENCLAW_IMAGE}
     restart: unless-stopped
     env_file:
-      - /home/ec2-user/.env
+      - /opt/openclaw/.env
     environment:
       HOME: /home/node
       NODE_ENV: production

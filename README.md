@@ -58,6 +58,27 @@ make ec2-spot-output
 make ci         # Run all CI checks (lint, mypy, format, test)
 ```
 
+## Runtime Layout (EC2)
+
+- OpenClaw runtime home is `/opt/openclaw` (compose file, `.env`, and state)
+- systemd service name is `openclaw.service`
+- Docker/ECR login is performed in service pre-start as `ec2-user`
+- OpenClaw state path is `/opt/openclaw/.openclaw` (suitable for a detachable data volume)
+
+## Persistent Data Volume (EC2 Spot stack)
+
+Optional Pulumi config values for `ec2-spot` stack:
+
+```bash
+pulumi config set data_volume_size_gib 20
+pulumi config set data_device_name /dev/sdf
+pulumi config set data_volume_snapshot_id snap-0123456789abcdef0
+```
+
+- A dedicated encrypted EBS volume is created and attached to the Spot instance.
+- Cloud-init formats/mounts the data disk at `/opt/openclaw` on first boot.
+- The data volume uses Pulumi `retain_on_delete`, so `pulumi destroy` keeps the disk for later re-attach/restore workflows.
+
 You can inspect all available commands with:
 
 ```bash

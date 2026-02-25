@@ -12,9 +12,10 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
         "compose_version": "v9.9.9",
         "cloudwatch_agent_config": '{"agent":{"metrics_collection_interval":60}}',
         "docker_compose_config": "services:\n  app:\n    image: demo/app:latest",
-        "docker_compose_service": "[Unit]\nDescription=Demo Service",
+        "openclaw_service": "[Unit]\nDescription=Demo Service",
         "aws_region": "ap-southeast-2",
         "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
+        "openclaw_data_device_name": "/dev/sdf",
     }
 
     rendered = render_template("cloud-config.yaml.j2", context)
@@ -25,10 +26,6 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
     assert "metrics_collection_interval" in rendered
     assert "image: demo/app:latest" in rendered
     assert "Description=Demo Service" in rendered
-    assert (
-        "aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin 123.dkr.ecr.ap-southeast-2.amazonaws.com"
-        in rendered
-    )
 
 
 def test_render_template_raises_for_missing_required_context_variable() -> None:
@@ -50,7 +47,7 @@ def test_render_template_raises_for_missing_template_file() -> None:
 
 def test_load_template_source_reads_template_text() -> None:
     """Load raw template text from disk and verify expected contents."""
-    source = load_template_source("docker-service.conf")
+    source = load_template_source("openclaw-service.conf")
 
     assert "[Unit]" in source
     assert "ExecStart=" in source

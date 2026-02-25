@@ -7,6 +7,33 @@ packages:
   - awscli
   - amazon-cloudwatch-agent
 
+bootcmd:
+  - |
+    OPENCLAW_HOME="/opt/openclaw"
+    OPENCLAW_DATA_DEVICE="{{ openclaw_data_device_name }}"
+    ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p[0-9]\+$//')
+
+    mkdir -p "$OPENCLAW_HOME"
+
+    if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
+      DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
+    else
+      DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "$ROOT_DEVICE" | head -n1)
+    fi
+
+    if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
+      if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+        mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
+      fi
+
+      UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
+      if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
+        echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
+      fi
+
+      mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
+    fi
+
 # 1. Files to be created on the instance
 write_files:
   - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
@@ -15,19 +42,19 @@ write_files:
     content: |
       {{ cloudwatch_agent_config | indent(width=6) }}
 
-  - path: /home/ec2-user/docker-compose.yaml
+  - path: /opt/openclaw/docker-compose.yaml
     owner: ec2-user:ec2-user
     permissions: '0644'
     defer: true
     content: |
       {{ docker_compose_config | indent(width=6) }}
 
-  - path: /etc/systemd/system/docker-compose.service
+  - path: /etc/systemd/system/openclaw.service
     owner: root:root
     permissions: '0644'
     defer: true
     content: |
-      {{ docker_compose_service | indent(width=6) }}
+      {{ openclaw_service | indent(width=6) }}
 
 # 2. Commands to run after files are written
 runcmd:
@@ -43,17 +70,19 @@ runcmd:
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
   - |
-    mkdir -p /home/ec2-user/.openclaw/workspace
-    chmod 700 /home/ec2-user/.openclaw
-    chmod 700 /home/ec2-user/.openclaw/workspace
-    echo '{}' > /home/ec2-user/.openclaw/openclaw.json
-    chmod 600 /home/ec2-user/.openclaw/openclaw.json
-    chown -R 1000:1000 /home/ec2-user/.openclaw
+    OPENCLAW_HOME="/opt/openclaw"
+    mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
+    chmod 700 "$OPENCLAW_HOME/.openclaw"
+    chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
+    echo '{}' > "$OPENCLAW_HOME/.openclaw/openclaw.json"
+    chmod 600 "$OPENCLAW_HOME/.openclaw/openclaw.json"
+    chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
 
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
   - |
-    ENV_FILE="/home/ec2-user/.env"
+    OPENCLAW_HOME="/opt/openclaw"
+    ENV_FILE="$OPENCLAW_HOME/.env"
     TMP_ENV_FILE="${ENV_FILE}.tmp"
 
     # Retrieve dotenv contents from SSM Parameter Store into a temporary file
@@ -79,15 +108,11 @@ runcmd:
     mv "$TMP_ENV_FILE" "$ENV_FILE"
     chown ec2-user:ec2-user "$ENV_FILE"
     chmod 600 "$ENV_FILE"
-    chmod 600 /home/ec2-user/.env
 
   # Start Docker service
   - systemctl enable docker.service
   - systemctl start docker.service
 
-  # Login to ECR (requires Docker running)
-  - echo "Logging into ECR..."
-  - aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry_domain }}
-
-  - systemctl enable docker-compose.service
-  - systemctl start docker-compose.service
+  - systemctl daemon-reload
+  - systemctl enable openclaw.service
+  - systemctl start openclaw.service
