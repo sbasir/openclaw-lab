@@ -76,9 +76,21 @@ runcmd:
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
-    echo '{}' > "$OPENCLAW_HOME/.openclaw/openclaw.json"
+    cat > "$OPENCLAW_HOME/.openclaw/openclaw.json" <<-EOF
+    {
+      "gateway": {
+        "controlUi": {
+          "dangerouslyAllowHostHeaderOriginFallback": true
+        }
+      }
+    }
+    EOF
     chmod 600 "$OPENCLAW_HOME/.openclaw/openclaw.json"
     chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
+
+  # Create symlink so docker-compose automatically finds .env in /run/openclaw
+  # This allows users to run docker-compose commands without --env-file flag
+  - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
