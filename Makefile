@@ -41,7 +41,7 @@ endif
 
 define print_help_section
 	@echo "$(YELLOW)$(1)$(NC)"
-	@grep -E '^[a-zA-Z0-9_-]+:.*##[!]? .*$$' $(MAKEFILE_LIST) | \
+	@grep -h -E '^[a-zA-Z0-9_-]+:.*##[!]? .*$$' $(MAKEFILE_LIST) | \
 	grep "$(2)" | \
 	awk -F '##' \
 	'{ \
@@ -158,7 +158,7 @@ platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
 
 ##@ GitHub Actions Commands
 
-.PHONY: actions-lint gh-act-ci gh-act-infra-preview
+.PHONY: actions-lint gh-act-ci gh-act-infra-preview gh-act-infra-up gh-act-infra-destroy gh-act-build-push-openclaw-image
 
 actions-lint: ## GitHub Actions: Lint GitHub Actions workflow files
 	@echo "$(GREEN)Linting GitHub Actions workflow files...$(NC)"
@@ -174,6 +174,21 @@ gh-act-ci: ## GitHub Actions: Run CI workflow locally using act
 
 gh-act-infra-preview: ## GitHub Actions: Run Infra Preview workflow locally using act
 	@$(ACT) -W .github/workflows/infra-preview.yaml $(ACT_FLAGS) $(ACT_INFRA_FLAGS)
+
+gh-act-infra-up: ## GitHub Actions: Run Infra Up workflow locally using act
+	@$(ACT) workflow_dispatch \
+		-W .github/workflows/infra-up.yaml \
+		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
+
+gh-act-infra-destroy: ## GitHub Actions: Run Infra Destroy workflow locally using act
+	@$(ACT) workflow_dispatch \
+		-W .github/workflows/infra-destroy.yaml \
+		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
+
+gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Docker image to ECR locally using act
+	@$(ACT) workflow_dispatch \
+		-W .github/workflows/build-push-image.yaml \
+		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 ##@ Helpful Commands
 

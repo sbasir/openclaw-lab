@@ -84,5 +84,10 @@ runcmd:
   # Start Docker service
   - systemctl enable docker.service
   - systemctl start docker.service
+
+  # Login to ECR (requires Docker running)
+  - echo "Logging into ECR..."
+  - aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry_domain }}
+
   - systemctl enable docker-compose.service
   - systemctl start docker-compose.service
