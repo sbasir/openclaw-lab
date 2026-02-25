@@ -206,7 +206,38 @@ gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Doc
 
 ##@ Helpful Commands
 
-.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter
+.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter ec2-spot-prices
+
+ec2-spot-prices: ## Helpful: Show recent spot prices per AZ for INSTANCE_TYPES="t4g.small t4g.medium"
+	@if [ -z "$(INSTANCE_TYPES)" ]; then \
+		echo "Usage: make ec2-spot-prices INSTANCE_TYPES=\"t4g.small t4g.medium\" [REGION=me-central-1]"; \
+		exit 1; \
+	fi
+	@tmp_specs=$$(mktemp); \
+	echo "Spot prices in region $(REGION) (sorted by price, unique AZ+InstanceType):"; \
+	$(AWS) ec2 describe-instance-types --instance-types $(INSTANCE_TYPES) --region $(REGION) --output json | \
+	jq -r '.InstanceTypes[] | [.InstanceType, .VCpuInfo.DefaultVCpus, .MemoryInfo.SizeInMiB] | @tsv' > "$$tmp_specs" && \
+	$(AWS) ec2 describe-spot-price-history \
+		--region $(REGION) \
+		--instance-types $(INSTANCE_TYPES) \
+		--product-descriptions "Linux/UNIX" \
+		--max-items 500 \
+		--no-cli-pager \
+		--output json | \
+	jq -r '.SpotPriceHistory | unique_by(.InstanceType + ":" + .AvailabilityZone) | sort_by(.SpotPrice | tonumber) | .[] | [.AvailabilityZone, .InstanceType, (.SpotPrice | tonumber)] | @tsv' | \
+	awk 'BEGIN {OFS="\t"; \
+		while((getline < "'"$$tmp_specs"'") > 0) { \
+			specmap[$$1] = $$2 "\t" $$3; \
+		} \
+		close("'"$$tmp_specs"'"); \
+		print "AZ", "InstanceType", "VCpus", "MemoryMiB", "PriceUSD/hr", "PriceUSD/mo"; \
+	} \
+	{ \
+		vcpus_mem = specmap[$$2]; \
+		split(vcpus_mem, vm, "\t"); \
+		printf "%s\t%s\t%s\t%s\t%.6f\t%.2f\n", $$1, $$2, vm[1], vm[2], $$3, $$3*720 \
+	}' | column -t; \
+	rm -f "$$tmp_specs"
 
 openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session Manager
 	@cd ec2-spot && \

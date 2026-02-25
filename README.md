@@ -74,11 +74,23 @@ Optional Pulumi config values for `ec2-spot` stack:
 pulumi config set data_volume_size_gib 20
 pulumi config set data_device_name /dev/sdf
 pulumi config set data_volume_snapshot_id snap-0123456789abcdef0
+pulumi config set snapshot_schedule_interval_hours 24
+pulumi config set snapshot_retention_days 30
+pulumi config set availability_zone me-central-1a
+```
+
+Before choosing `availability_zone`, you can inspect recent spot prices:
+
+```bash
+make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium" REGION=me-central-1
 ```
 
 - A dedicated encrypted EBS volume is created and attached to the Spot instance.
 - Cloud-init formats/mounts the data disk at `/opt/openclaw` on first boot.
-- The data volume uses Pulumi `retain_on_delete`, so `pulumi destroy` keeps the disk for later re-attach/restore workflows.
+- The data volume is tagged for DLM-managed scheduled snapshots with retention controls.
+- `pulumi destroy` deletes the data volume; recovery is snapshot-first (restore via `data_volume_snapshot_id`).
+- AZ selection is deterministic and required (`availability_zone`).
+- Snapshot restore guardrail: snapshot `OpenClawAz` tag must match configured `availability_zone`.
 
 You can inspect all available commands with:
 

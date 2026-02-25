@@ -26,6 +26,17 @@ data_volume_size_gib = int(config.get("data_volume_size_gib") or "20")
 data_device_name = config.get("data_device_name") or "/dev/sdf"
 # set via: pulumi config set data_volume_snapshot_id snap-0123456789abcdef0 --stack dev
 data_volume_snapshot_id = config.get("data_volume_snapshot_id")
+# set via: pulumi config set availability_zone me-central-1a --stack dev
+availability_zone = config.require("availability_zone")
+# set via: pulumi config set snapshot_schedule_interval_hours 24 --stack dev
+snapshot_schedule_interval_hours = int(
+    config.get("snapshot_schedule_interval_hours") or "24"
+)
+# set via: pulumi config set snapshot_retention_days 30 --stack dev
+snapshot_retention_days = int(config.get("snapshot_retention_days") or "30")
+
+if snapshot_retention_days < 1:
+    raise ValueError("snapshot_retention_days must be >= 1")
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
@@ -40,41 +51,6 @@ platform_stack = pulumi.StackReference(
 )
 ecr_repository_url = platform_stack.require_output("ecr_repository_url")
 
-
-def get_cheapest_az(
-    instance_type: str, region: str, product_description: str = "Linux/UNIX"
-) -> str:
-    """
-    Returns the cheapest Availability Zone for spot instances of the given instance type.
-    Uses the provided region.  The function is synchronous (blocking).
-    """
-    # 1. Get all AZs in the region
-    azs = aws.get_availability_zones(state="available", region=region).names
-
-    # 2. For each AZ, fetch the most recent spot price (synchronously)
-    prices: list[tuple[str, float]] = []
-    for az in azs:
-        price_data = aws.ec2.get_spot_price(
-            instance_type=instance_type,
-            filters=[
-                {
-                    "name": "product-description",
-                    "values": [product_description],
-                }
-            ],
-            region=region,
-            availability_zone=az,
-        )
-        prices.append((az, float(price_data.spot_price)))
-        pulumi.log.info(f"AZ: {az}, Spot Price: {price_data.spot_price}")
-
-    # 3. Find the AZ with the lowest price
-    cheapest_az: str = min(prices, key=lambda x: x[1])[0]
-    return cheapest_az
-
-
-cheapest_az = get_cheapest_az(instance_type=ec2_instance_type, region=aws_region)
-pulumi.export("cheapest_az", cheapest_az)
 
 # -----------------------------------------------------------------------------
 # IAM Role and Instance Profile for SSM and Parameter Store access
@@ -151,6 +127,34 @@ ec2_instance_profile = aws.iam.InstanceProfile(
     tags={"Name": f"{prefix}-instance-profile"},
 )
 
+dlm_assume_role_policy = aws.iam.get_policy_document(
+    statements=[
+        {
+            "actions": ["sts:AssumeRole"],
+            "principals": [
+                {
+                    "type": "Service",
+                    "identifiers": ["dlm.amazonaws.com"],
+                }
+            ],
+        }
+    ]
+)
+
+dlm_role = aws.iam.Role(
+    f"{prefix}-dlm-role",
+    name=f"{prefix}-dlm-role",
+    assume_role_policy=dlm_assume_role_policy.json,
+    description="IAM role for AWS Data Lifecycle Manager snapshots",
+    tags={"Name": f"{prefix}-dlm-role"},
+)
+
+aws.iam.RolePolicyAttachment(
+    f"{prefix}-dlm-role-policy",
+    role=dlm_role.name,
+    policy_arn="arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole",
+)
+
 
 # -----------------------------------------------------------------------------
 # Networking: VPC, Subnets, Internet Gateway, Route Table, Security Group
@@ -204,6 +208,33 @@ def create_public_subnet(
 
 
 azs = aws.get_availability_zones(region=aws_region).names
+
+if availability_zone not in azs:
+    raise ValueError(
+        f"availability_zone '{availability_zone}' is not in available AZs: {azs}"
+    )
+
+selected_az = availability_zone
+
+if data_volume_snapshot_id:
+    snapshot = aws.ebs.get_snapshot(snapshot_ids=[data_volume_snapshot_id])
+    snapshot_expected_az = snapshot.tags.get("OpenClawAz") if snapshot.tags else None
+
+    if snapshot_expected_az and selected_az != snapshot_expected_az:
+        raise ValueError(
+            "Configured availability_zone does not match snapshot OpenClawAz tag: "
+            f"availability_zone='{selected_az}', snapshot OpenClawAz='{snapshot_expected_az}'."
+        )
+
+    if not snapshot_expected_az:
+        raise ValueError(
+            "Snapshot is missing OpenClawAz tag, cannot validate AZ guardrail. "
+            "Use snapshots created by this stack's DLM policy, or set availability_zone "
+            "to match the original data volume AZ and tag the snapshot with OpenClawAz."
+        )
+
+pulumi.export("selected_az", selected_az)
+
 ipv4_cidrs = ipv4_subnets_cidrs(cidr_block, len(azs))
 ipv6_cidrs = ipv6_subnets_cidrs(vpc.ipv6_cidr_block, len(azs))
 subnets: list[aws.ec2.Subnet] = []
@@ -270,7 +301,7 @@ else:
     )
 
 
-subnet_in_cheapest_az = {az: subnet for az, subnet in zip(azs, subnets)}[cheapest_az]
+subnet_in_selected_az = {az: subnet for az, subnet in zip(azs, subnets)}[selected_az]
 
 # Create the Spot Instance Request
 spot = aws.ec2.SpotInstanceRequest(
@@ -279,7 +310,7 @@ spot = aws.ec2.SpotInstanceRequest(
     instance_type=ec2_instance_type,  # Suitable ARM-based instance for OpenClaw Lab server
     iam_instance_profile=ec2_instance_profile.name,
     vpc_security_group_ids=[ec2_sg.id],
-    subnet_id=subnet_in_cheapest_az.id,
+    subnet_id=subnet_in_selected_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
     user_data=ecr_repository_url.apply(
@@ -316,7 +347,7 @@ spot = aws.ec2.SpotInstanceRequest(
 
 data_volume = aws.ebs.Volume(
     f"{prefix}-data-volume",
-    availability_zone=cheapest_az,
+    availability_zone=selected_az,
     size=data_volume_size_gib,
     type="gp3",
     encrypted=True,
@@ -324,8 +355,47 @@ data_volume = aws.ebs.Volume(
     tags={
         "Name": f"{prefix}-data-volume",
         "Purpose": "OpenClaw Persistent Data",
+        "OpenClawData": "true",
+        "OpenClawStack": pulumi.get_stack(),
+        "OpenClawAz": selected_az,
     },
-    opts=pulumi.ResourceOptions(retain_on_delete=True),
+)
+
+aws.dlm.LifecyclePolicy(
+    f"{prefix}-data-volume-snapshot-policy",
+    description="OpenClaw data volume scheduled snapshots",
+    execution_role_arn=dlm_role.arn,
+    state="ENABLED",
+    policy_details=aws.dlm.LifecyclePolicyPolicyDetailsArgs(
+        resource_types=["VOLUME"],
+        target_tags={
+            "OpenClawData": "true",
+            "OpenClawStack": pulumi.get_stack(),
+        },
+        schedules=[
+            aws.dlm.LifecyclePolicyPolicyDetailsScheduleArgs(
+                name="openclaw-data-daily",
+                copy_tags=True,
+                create_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleCreateRuleArgs(
+                    interval=snapshot_schedule_interval_hours,
+                    interval_unit="HOURS",
+                    times="03:00",
+                ),
+                retain_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleRetainRuleArgs(
+                    interval=snapshot_retention_days,
+                    interval_unit="DAYS",
+                ),
+                tags_to_add={
+                    "CreatedBy": "dlm",
+                    "OpenClawData": "true",
+                    "OpenClawStack": pulumi.get_stack(),
+                },
+            )
+        ],
+    ),
+    tags={
+        "Name": f"{prefix}-data-volume-snapshot-policy",
+    },
 )
 
 aws.ec2.VolumeAttachment(
