@@ -213,6 +213,10 @@ ec2-spot-prices: ## Helpful: Show recent spot prices per AZ for INSTANCE_TYPES="
 		echo "Usage: make ec2-spot-prices INSTANCE_TYPES=\"t4g.small t4g.medium\" [REGION=me-central-1]"; \
 		exit 1; \
 	fi
+	@if [ -z "$(REGION)" ]; then \
+		echo "Error: REGION is not set. Example: make ec2-spot-prices INSTANCE_TYPES=\"t4g.small t4g.medium\" REGION=me-central-1"; \
+		exit 1; \
+	fi
 	@tmp_specs=$$(mktemp); \
 	echo "Spot prices in region $(REGION) (sorted by price, unique AZ+InstanceType):"; \
 	$(AWS) ec2 describe-instance-types --instance-types $(INSTANCE_TYPES) --region $(REGION) --output json | \

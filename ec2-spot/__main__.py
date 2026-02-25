@@ -32,11 +32,16 @@ availability_zone = config.require("availability_zone")
 snapshot_schedule_interval_hours = int(
     config.get("snapshot_schedule_interval_hours") or "24"
 )
+# set via: pulumi config set snapshot_schedule_time 03:00 --stack dev
+snapshot_schedule_time = config.get("snapshot_schedule_time") or "03:00"
 # set via: pulumi config set snapshot_retention_days 30 --stack dev
 snapshot_retention_days = int(config.get("snapshot_retention_days") or "30")
 
 if snapshot_retention_days < 1:
     raise ValueError("snapshot_retention_days must be >= 1")
+
+if snapshot_schedule_interval_hours < 1:
+    raise ValueError("snapshot_schedule_interval_hours must be >= 1")
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
@@ -228,9 +233,10 @@ if data_volume_snapshot_id:
 
     if not snapshot_expected_az:
         raise ValueError(
-            "Snapshot is missing OpenClawAz tag, cannot validate AZ guardrail. "
-            "Use snapshots created by this stack's DLM policy, or set availability_zone "
-            "to match the original data volume AZ and tag the snapshot with OpenClawAz."
+            "Snapshot is missing required OpenClawAz tag; cannot validate AZ guardrail. "
+            "Any snapshot used (whether created by this stack's DLM policy or manually) "
+            "must be tagged with OpenClawAz matching the original data volume "
+            "availability_zone."
         )
 
 pulumi.export("selected_az", selected_az)
@@ -374,12 +380,12 @@ aws.dlm.LifecyclePolicy(
         },
         schedules=[
             aws.dlm.LifecyclePolicyPolicyDetailsScheduleArgs(
-                name="openclaw-data-daily",
+                name="openclaw-data-snapshot",
                 copy_tags=True,
                 create_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleCreateRuleArgs(
                     interval=snapshot_schedule_interval_hours,
                     interval_unit="HOURS",
-                    times="03:00",
+                    times=snapshot_schedule_time,
                 ),
                 retain_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleRetainRuleArgs(
                     interval=snapshot_retention_days,
@@ -404,7 +410,10 @@ aws.ec2.VolumeAttachment(
     volume_id=data_volume.id,
     instance_id=spot.spot_instance_id,
     stop_instance_before_detaching=True,
-    opts=pulumi.ResourceOptions(depends_on=[spot, data_volume]),
+    opts=pulumi.ResourceOptions(
+        depends_on=[spot, data_volume],
+        delete_before_replace=True,
+    ),
 )
 
 aws.ec2.Tag(

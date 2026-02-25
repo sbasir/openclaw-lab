@@ -218,3 +218,39 @@ Delete one snapshot:
 ```bash
 aws ec2 delete-snapshot --region me-central-1 --snapshot-id snap-xxxxxxxxxxxxxxxxx
 ```
+
+### 7) Troubleshooting: `VolumeInUse` during `pulumi up`
+
+Symptom:
+
+```text
+api error VolumeInUse: vol-... is already attached to an instance
+```
+
+What this means:
+- Pulumi attempted to replace `aws:ec2:VolumeAttachment` and AWS rejected a second attach while the volume was still attached.
+
+Current mitigation in code:
+- `VolumeAttachment` is configured with `delete_before_replace=True`.
+
+Operational recovery steps:
+
+```bash
+cd ec2-spot
+pulumi refresh
+pulumi up
+```
+
+If still blocked, verify and detach stale attachment manually:
+
+```bash
+aws ec2 describe-volumes --region me-central-1 --volume-ids vol-xxxxxxxxxxxxxxxxx --query 'Volumes[0].Attachments' --output table
+aws ec2 detach-volume --region me-central-1 --volume-id vol-xxxxxxxxxxxxxxxxx
+```
+
+Then run:
+
+```bash
+cd ec2-spot
+pulumi up
+```

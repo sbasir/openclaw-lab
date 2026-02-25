@@ -330,6 +330,17 @@ ec2_volume_policy = aws.iam.RolePolicy(
                         f"arn:aws:ec2:{aws_region}:{account_id}:instance/*",
                     ],
                 },
+                {
+                    "Sid": "EC2SnapshotManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:CreateSnapshot",
+                        "ec2:DeleteSnapshot",
+                        "ec2:DescribeSnapshots",
+                        "ec2:CreateTags",
+                    ],
+                    "Resource": "*",
+                },
             ],
         }
     ),
@@ -352,6 +363,7 @@ dlm_policy = aws.iam.RolePolicy(
                         "dlm:DeleteLifecyclePolicy",
                         "dlm:GetLifecyclePolicy",
                         "dlm:UpdateLifecyclePolicy",
+                        "dlm:ListTagsForResource",
                         "dlm:TagResource",
                     ],
                     "Resource": f"arn:aws:dlm:{aws_region}:{account_id}:policy/*",

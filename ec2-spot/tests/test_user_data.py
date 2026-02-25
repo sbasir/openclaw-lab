@@ -79,6 +79,7 @@ def test_build_user_data_includes_data_device_name() -> None:
     )
 
     assert 'OPENCLAW_DATA_DEVICE="/dev/sdg"' in user_data
+    assert 'if [ -b "$OPENCLAW_DATA_DEVICE" ]; then' in user_data
 
 
 def test_extract_ecr_registry_domain_returns_registry_part() -> None:

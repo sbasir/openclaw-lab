@@ -68,7 +68,7 @@ make ci         # Run all CI checks (lint, mypy, format, test)
 
 ## Persistent Data Volume (EC2 Spot stack)
 
-Optional Pulumi config values for `ec2-spot` stack:
+Pulumi config values for `ec2-spot` stack (`availability_zone` is required; others optional):
 
 ```bash
 pulumi config set data_volume_size_gib 20

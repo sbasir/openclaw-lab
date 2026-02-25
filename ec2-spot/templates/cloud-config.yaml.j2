@@ -32,6 +32,8 @@ bootcmd:
       fi
 
       mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
+    else
+      echo "WARNING: No data device found for $OPENCLAW_HOME; continuing without mounting a persistent volume." >&2
     fi
 
 # 1. Files to be created on the instance
