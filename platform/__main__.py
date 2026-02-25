@@ -335,6 +335,32 @@ ec2_volume_policy = aws.iam.RolePolicy(
     ),
 )
 
+# DLM permissions: manage machine images for the EC2 instance.
+dlm_policy = aws.iam.RolePolicy(
+    f"{prefix}-dlm-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "DLMImageManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "dlm:GetLifecyclePolicies",
+                        "dlm:CreateLifecyclePolicy",
+                        "dlm:DeleteLifecyclePolicy",
+                        "dlm:GetLifecyclePolicy",
+                        "dlm:UpdateLifecyclePolicy",
+                        "dlm:TagResource",
+                    ],
+                    "Resource": f"arn:aws:dlm:{aws_region}:{account_id}:policy/*",
+                },
+            ],
+        }
+    ),
+)
+
 # =============================================================================
 # Private ECR Repository
 # =============================================================================
