@@ -80,35 +80,6 @@ runcmd:
 
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
-  - |
-    OPENCLAW_HOME="/opt/openclaw"
-    ENV_FILE="$OPENCLAW_HOME/.env"
-    TMP_ENV_FILE="${ENV_FILE}.tmp"
-
-    # Retrieve dotenv contents from SSM Parameter Store into a temporary file
-    aws ssm get-parameter \
-      --name '/openclaw-lab/dotenv' \
-      --with-decryption \
-      --region {{ aws_region }} \
-      --query 'Parameter.Value' \
-      --output text > "$TMP_ENV_FILE"
-
-    if [ $? -ne 0 ]; then
-      echo "ERROR: Failed to retrieve SSM parameter '/openclaw-lab/dotenv'. Check IAM permissions, region, and parameter existence." >&2
-      rm -f "$TMP_ENV_FILE"
-      exit 1
-    fi
-
-    if [ ! -s "$TMP_ENV_FILE" ]; then
-      echo "ERROR: Retrieved SSM parameter '/openclaw-lab/dotenv' is empty. Refusing to overwrite $ENV_FILE." >&2
-      rm -f "$TMP_ENV_FILE"
-      exit 1
-    fi
-
-    mv "$TMP_ENV_FILE" "$ENV_FILE"
-    chown ec2-user:ec2-user "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-
   # Start Docker service
   - systemctl enable docker.service
   - systemctl start docker.service

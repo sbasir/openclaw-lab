@@ -1,7 +1,7 @@
 OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:main
 # Example only. Replace with a strong, secret token for production use.
 OPENCLAW_GATEWAY_TOKEN=REPLACE_WITH_SECURE_GATEWAY_TOKEN
-OPENCLAW_GATEWAY_BIND=lan
+OPENCLAW_GATEWAY_BIND=loopback
 OPENCLAW_GATEWAY_PORT=18789
 
 OPENCLAW_CONFIG_DIR=/home/ec2-user/.openclaw

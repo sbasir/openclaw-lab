@@ -18,7 +18,7 @@ def test_build_user_data_renders_cloud_config(aws_region: str) -> None:
     assert user_data.startswith("#cloud-config")
     assert "/opt/openclaw/docker-compose.yaml" in user_data
     assert "/etc/systemd/system/openclaw.service" in user_data
-    assert "/opt/openclaw/.env" in user_data
+    assert "/run/openclaw/.env" in user_data
     assert "systemctl enable openclaw.service" in user_data
     assert "systemctl start openclaw.service" in user_data
     assert "aws ecr get-login-password --region" in user_data
@@ -30,7 +30,7 @@ def test_build_user_data_renders_cloud_config(aws_region: str) -> None:
 
 @pytest.mark.parametrize("aws_region", ["us-east-1", "eu-west-1", "ap-southeast-2"])
 def test_build_user_data_includes_ssm_parameter_and_region(aws_region: str) -> None:
-    """Ensure SSM fetch command contains parameter name and selected region."""
+    """Ensure service pre-start SSM fetch contains parameter name and region."""
     user_data = build_user_data(
         aws_region=aws_region,
         ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",

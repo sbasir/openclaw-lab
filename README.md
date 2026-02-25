@@ -60,10 +60,11 @@ make ci         # Run all CI checks (lint, mypy, format, test)
 
 ## Runtime Layout (EC2)
 
-- OpenClaw runtime home is `/opt/openclaw` (compose file, `.env`, and state)
+- OpenClaw runtime home is `/opt/openclaw` (compose file and state)
 - systemd service name is `openclaw.service`
 - Docker/ECR login is performed in service pre-start as `ec2-user`
 - OpenClaw state path is `/opt/openclaw/.openclaw` (suitable for a detachable data volume)
+- Runtime secrets file is `/run/openclaw/.env` (re-hydrated from SSM at service start)
 
 ## Persistent Data Volume (EC2 Spot stack)
 

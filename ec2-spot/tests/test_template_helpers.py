@@ -22,7 +22,7 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
 
     assert rendered.startswith("#cloud-config")
     assert "compose/releases/download/v9.9.9/docker-compose-linux-" in rendered
-    assert "--region ap-southeast-2" in rendered
+    assert 'OPENCLAW_DATA_DEVICE="/dev/sdf"' in rendered
     assert "metrics_collection_interval" in rendered
     assert "image: demo/app:latest" in rendered
     assert "Description=Demo Service" in rendered
