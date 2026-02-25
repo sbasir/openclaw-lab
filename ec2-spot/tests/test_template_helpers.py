@@ -61,3 +61,10 @@ def test_load_template_source_raises_for_missing_file() -> None:
     """Loading a missing file should raise FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="does-not-exist.conf"):
         load_template_source("does-not-exist.conf")
+
+
+@pytest.mark.parametrize("template_name", ["../pyproject.toml", "../../README.md"])
+def test_load_template_source_blocks_path_traversal(template_name: str) -> None:
+    """Loading outside templates directory should be rejected."""
+    with pytest.raises(ValueError, match="templates directory"):
+        load_template_source(template_name)

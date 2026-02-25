@@ -79,22 +79,36 @@ install-platform:
 	@cd platform && $(PULUMI) install
 
 install: ## Setup: Install all dependencies
-	$(MAKE) install-ec2-spot
-	$(MAKE) install-platform
+	@$(MAKE) install-ec2-spot
+	@$(MAKE) install-platform
 
 lint-ec2-spot:
 	@echo "$(GREEN)Linting EC2 Spot Instance code...$(NC)"
 	@cd ec2-spot && \
 	$(VENV_DIR)/bin/ruff check .
 
+mypy-ec2-spot:
+	@echo "$(GREEN)Running static code check for EC2 Spot Instance...$(NC)"
+	@cd ec2-spot && \
+	$(VENV_DIR)/bin/mypy .
+
 lint-platform:
 	@echo "$(GREEN)Linting Platform code...$(NC)"
 	@cd platform && \
 	$(VENV_DIR)/bin/ruff check .
 
+mypy-platform:
+	@echo "$(GREEN)Running static code check for Platform...$(NC)"
+	@cd platform && \
+	$(VENV_DIR)/bin/mypy .
+
 lint: ## Setup: Lint the code
-	$(MAKE) lint-ec2-spot
-	$(MAKE) lint-platform
+	@$(MAKE) lint-ec2-spot
+	@$(MAKE) lint-platform
+
+mypy: ## Setup: Run static type checks
+	@$(MAKE) mypy-ec2-spot
+	@$(MAKE) mypy-platform
 
 format: ## Setup: Format the code
 	@echo "$(GREEN)Formatting the code...$(NC)"
@@ -109,9 +123,9 @@ test-ec2-spot:
 	$(VENV_DIR)/bin/python -m pytest -q
 
 test: ## Setup: Run tests
-	$(MAKE) test-ec2-spot
+	@$(MAKE) test-ec2-spot
 
-ci: install lint format test ## Setup: Run CI checks (lint, format, test)
+ci: install lint mypy format test ## Setup: Run CI checks (lint, mypy, format, test)
 	@echo "$(GREEN)CI checks passed!$(NC)"
 
 ##@ Infra Commands

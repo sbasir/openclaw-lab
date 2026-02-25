@@ -15,15 +15,17 @@ config = pulumi.Config()
 
 # set via: pulumi config set ami ami-0123456789abcdef --stack dev
 ami_override = config.get("ami")
-# AWS region is determined by the AWS provider configuration, which can be set via environment variables or Pulumi config.  If not set, it will default to "false" and raise an error.
-aws_region = aws.config.region or "false"
+
 # set via: pulumi config set instance_type t4g.small --stack dev
 ec2_instance_type = config.get("instance_type") or "t4g.small"  # 2 VCPUs, 2 GB RAM
 # set via: pulumi config set cidr_block 10.0.0.0/16 --stack dev
 cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
 
-if not aws_region or aws_region == "false":
+if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
+
+# AWS region is determined by provider configuration (environment or stack config).
+aws_region = aws.config.region
 
 # Reference the platform stack to get ECR repository URI
 # Assumes the platform stack has the same name as the current stack (e.g. 'dev')

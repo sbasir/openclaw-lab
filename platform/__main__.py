@@ -110,22 +110,20 @@ ec2_policy = aws.iam.RolePolicy(
                     "Sid": "EC2FullForOpenClaw",
                     "Effect": "Allow",
                     "Action": [
+                        # General Read permissions (needed for lookups and some actions)
+                        "ec2:Describe*",
                         # VPC and networking
                         "ec2:CreateVpc",
                         "ec2:DeleteVpc",
-                        "ec2:DescribeVpcs",
                         "ec2:ModifyVpcAttribute",
                         "ec2:CreateSubnet",
                         "ec2:DeleteSubnet",
-                        "ec2:DescribeSubnets",
                         "ec2:CreateInternetGateway",
                         "ec2:DeleteInternetGateway",
                         "ec2:AttachInternetGateway",
                         "ec2:DetachInternetGateway",
-                        "ec2:DescribeInternetGateways",
                         "ec2:CreateRouteTable",
                         "ec2:DeleteRouteTable",
-                        "ec2:DescribeRouteTables",
                         "ec2:CreateRoute",
                         "ec2:DeleteRoute",
                         "ec2:ReplaceRoute",
@@ -134,18 +132,13 @@ ec2_policy = aws.iam.RolePolicy(
                         # Security groups
                         "ec2:CreateSecurityGroup",
                         "ec2:DeleteSecurityGroup",
-                        "ec2:DescribeSecurityGroups",
-                        "ec2:DescribeSecurityGroupRules",
                         "ec2:AuthorizeSecurityGroupEgress",
                         "ec2:AuthorizeSecurityGroupIngress",
                         "ec2:RevokeSecurityGroupEgress",
                         "ec2:RevokeSecurityGroupIngress",
-                        # Spot instances
+                        # EC2 / Spot instances
                         "ec2:RequestSpotInstances",
                         "ec2:CancelSpotInstanceRequests",
-                        "ec2:DescribeSpotInstanceRequests",
-                        "ec2:DescribeSpotPriceHistory",
-                        "ec2:DescribeInstances",
                         "ec2:TerminateInstances",
                         "ec2:StopInstances",
                         "ec2:StartInstances",
@@ -155,24 +148,15 @@ ec2_policy = aws.iam.RolePolicy(
                         "ec2:ReleaseAddress",
                         "ec2:AssociateAddress",
                         "ec2:DisassociateAddress",
-                        "ec2:DescribeAddresses",
-                        # AMI and AZ lookups
-                        "ec2:DescribeImages",
-                        "ec2:DescribeAvailabilityZones",
                         # Tags
                         "ec2:CreateTags",
                         "ec2:DeleteTags",
-                        "ec2:DescribeTags",
                         # IPv6
                         "ec2:AssociateVpcCidrBlock",
                         "ec2:DisassociateVpcCidrBlock",
                         "ec2:AssociateSubnetCidrBlock",
                         "ec2:DisassociateSubnetCidrBlock",
                         "ec2:ModifySubnetAttribute",
-                        # Network interfaces (spot instances)
-                        "ec2:DescribeNetworkInterfaces",
-                        # Account attributes (needed by Pulumi provider)
-                        "ec2:DescribeAccountAttributes",
                     ],
                     "Resource": "*",
                 },
@@ -316,31 +300,10 @@ sts_policy = aws.iam.RolePolicy(
 )
 
 # ECR permissions: push/pull images
-ecr_policy = aws.iam.RolePolicy(
+ecr_policy_attachment = aws.iam.RolePolicyAttachment(
     f"{prefix}-ecr-policy",
     role=github_actions_role.name,
-    policy=json.dumps(
-        {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Sid": "ECRPushPull",
-                    "Effect": "Allow",
-                    "Action": [
-                        "ecr:GetAuthorizationToken",
-                        "ecr:BatchCheckLayerAvailability",
-                        "ecr:GetDownloadUrlForLayer",
-                        "ecr:BatchGetImage",
-                        "ecr:PutImage",
-                        "ecr:InitiateLayerUpload",
-                        "ecr:UploadLayerPart",
-                        "ecr:CompleteLayerUpload",
-                    ],
-                    "Resource": "*",
-                },
-            ],
-        }
-    ),
+    policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser",
 )
 
 # =============================================================================

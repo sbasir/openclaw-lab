@@ -57,6 +57,14 @@ class TestAllocateIPv4Subnets:
         with pytest.raises(ValueError, match="Expected an IPv4 CIDR block"):
             allocate_ipv4_subnets("2600:1f14:abcd::/56", 2, subnet_prefix=24)
 
+    def test_raises_when_subnet_count_is_zero(self) -> None:
+        with pytest.raises(ValueError, match="subnet_count must be greater than 0"):
+            allocate_ipv4_subnets("10.0.0.0/16", 0, subnet_prefix=24)
+
+    def test_raises_when_subnet_prefix_exceeds_ipv4_max(self) -> None:
+        with pytest.raises(ValueError, match="invalid for IPv4"):
+            allocate_ipv4_subnets("10.0.0.0/16", 1, subnet_prefix=33)
+
 
 class TestIPv4SubnetsCidrs:
     """ipv4_subnets_cidrs is the AZ-facing wrapper: always /24, count == az_count."""
@@ -94,6 +102,14 @@ class TestAllocateIPv6Subnets:
     def test_raises_for_ipv4_input(self) -> None:
         with pytest.raises(ValueError, match="Expected an IPv6 CIDR block"):
             allocate_ipv6_subnets("10.0.0.0/16", 2, subnet_prefix=64)
+
+    def test_raises_when_subnet_count_is_zero(self) -> None:
+        with pytest.raises(ValueError, match="subnet_count must be greater than 0"):
+            allocate_ipv6_subnets("2600:1f14:abcd:1200::/56", 0, subnet_prefix=64)
+
+    def test_raises_when_subnet_prefix_exceeds_ipv6_max(self) -> None:
+        with pytest.raises(ValueError, match="invalid for IPv6"):
+            allocate_ipv6_subnets("2600:1f14:abcd:1200::/56", 1, subnet_prefix=129)
 
 
 class TestAllocateIPv6SubnetsFromOptional:

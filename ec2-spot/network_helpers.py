@@ -16,6 +16,22 @@ import ipaddress
 from typing import Any, Optional
 
 
+IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+def _validate_subnet_request(
+    network: IpNetwork, subnet_count: int, subnet_prefix: int
+) -> None:
+    if subnet_count <= 0:
+        raise ValueError(f"subnet_count must be greater than 0, got: {subnet_count}")
+
+    max_prefix = 32 if network.version == 4 else 128
+    if subnet_prefix > max_prefix:
+        raise ValueError(
+            f"Subnet prefix /{subnet_prefix} is invalid for IPv{network.version}; max is /{max_prefix}"
+        )
+
+
 def canonicalize_ipv4_cidr(cidr: str) -> str:
     # Intentionally mirrors AWS CreateVpc/CreateSubnet behavior, which canonicalizes
     # host bits in CIDR input instead of rejecting it.
@@ -29,6 +45,7 @@ def allocate_ipv4_subnets(
     network = ipaddress.ip_network(base_cidr, strict=False)
     if network.version != 4:
         raise ValueError(f"Expected an IPv4 CIDR block, got: {base_cidr}")
+    _validate_subnet_request(network, subnet_count, subnet_prefix)
     if subnet_prefix < network.prefixlen:
         raise ValueError(
             f"Subnet prefix /{subnet_prefix} must be at least base prefix /{network.prefixlen}"
@@ -49,6 +66,7 @@ def allocate_ipv6_subnets(
     network = ipaddress.ip_network(base_cidr, strict=False)
     if network.version != 6:
         raise ValueError(f"Expected an IPv6 CIDR block, got: {base_cidr}")
+    _validate_subnet_request(network, subnet_count, subnet_prefix)
     if subnet_prefix < network.prefixlen:
         raise ValueError(
             f"Subnet prefix /{subnet_prefix} must be at least base prefix /{network.prefixlen}"

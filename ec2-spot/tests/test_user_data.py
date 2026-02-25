@@ -2,7 +2,11 @@
 
 import pytest
 
-from user_data import DEFAULT_COMPOSE_VERSION, build_user_data
+from user_data import (
+    DEFAULT_COMPOSE_VERSION,
+    build_user_data,
+    extract_ecr_registry_domain,
+)
 
 
 @pytest.mark.parametrize("aws_region", ["us-east-1", "eu-west-1"])
@@ -64,3 +68,29 @@ def test_build_user_data_requires_aws_region() -> None:
     """Ensure aws_region argument is required by the function signature."""
     with pytest.raises(TypeError):
         build_user_data()  # type: ignore[call-arg]
+
+
+def test_extract_ecr_registry_domain_returns_registry_part() -> None:
+    assert (
+        extract_ecr_registry_domain(
+            "123456789012.dkr.ecr.us-east-1.amazonaws.com/openclaw"
+        )
+        == "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+    )
+
+
+@pytest.mark.parametrize(
+    "ecr_repository_url",
+    [
+        "",
+        "   ",
+        "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        "/openclaw",
+        "123456789012.dkr.ecr.us-east-1.amazonaws.com/",
+    ],
+)
+def test_extract_ecr_registry_domain_raises_for_invalid_format(
+    ecr_repository_url: str,
+) -> None:
+    with pytest.raises(ValueError, match="<registry>/<repository>"):
+        extract_ecr_registry_domain(ecr_repository_url)
