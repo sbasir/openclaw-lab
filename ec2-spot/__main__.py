@@ -30,7 +30,7 @@ if not aws_region or aws_region == "false":
 platform_stack = pulumi.StackReference(
     f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}"
 )
-ecr_repository_uri = platform_stack.require_output("ecr_repository_uri")
+ecr_repository_url = platform_stack.require_output("ecr_repository_url")
 
 
 def get_cheapest_az(
@@ -274,8 +274,8 @@ spot = aws.ec2.SpotInstanceRequest(
     subnet_id=subnet_in_cheapest_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
-    user_data=ecr_repository_uri.apply(
-        lambda uri: build_user_data(aws_region=aws_region, ecr_repository_uri=uri)
+    user_data=ecr_repository_url.apply(
+        lambda url: build_user_data(aws_region=aws_region, ecr_repository_url=url)
     ),
     # Spot instance configuration
     spot_type="persistent",  # Keeps requesting if interrupted

@@ -5,7 +5,7 @@ from template_helpers import load_template_source, render_template
 DEFAULT_COMPOSE_VERSION = "v5.0.2"
 
 
-def build_user_data(aws_region: str, ecr_repository_uri: str) -> str:
+def build_user_data(aws_region: str, ecr_repository_url: str) -> str:
     """Return the cloud-init script used to bootstrap the instance.
 
     Parameters
@@ -16,7 +16,7 @@ def build_user_data(aws_region: str, ecr_repository_uri: str) -> str:
 
     # Extract registry domain from repository URI
     # URI format: <account_id>.dkr.ecr.<region>.amazonaws.com/<repo_name>
-    registry_domain = ecr_repository_uri.split("/")[0]
+    registry_domain = ecr_repository_url.split("/")[0]
 
     context = {
         "compose_version": DEFAULT_COMPOSE_VERSION,
