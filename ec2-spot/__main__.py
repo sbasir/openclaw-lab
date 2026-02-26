@@ -33,7 +33,7 @@ snapshot_schedule_interval_hours = int(
     config.get("snapshot_schedule_interval_hours") or "24"
 )
 # set via: pulumi config set snapshot_schedule_time 03:00 --stack dev
-snapshot_schedule_time = config.get("snapshot_schedule_time") or "03:00"
+snapshot_schedule_time = config.get("snapshot_schedule_time")
 # set via: pulumi config set snapshot_retention_days 30 --stack dev
 snapshot_retention_days = int(config.get("snapshot_retention_days") or "30")
 
@@ -42,6 +42,14 @@ if snapshot_retention_days < 1:
 
 if snapshot_schedule_interval_hours < 1:
     raise ValueError("snapshot_schedule_interval_hours must be >= 1")
+
+if not snapshot_schedule_time and snapshot_schedule_interval_hours == 24:
+    snapshot_schedule_time = "03:00"
+
+if snapshot_schedule_time and snapshot_schedule_interval_hours != 24:
+    raise ValueError(
+        "snapshot_schedule_time can only be set when snapshot_schedule_interval_hours is 24"
+    )
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")

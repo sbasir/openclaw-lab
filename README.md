@@ -86,6 +86,7 @@ make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium" REGION=me-central-1
 ```
 
 - A dedicated encrypted EBS volume is created and attached to the Spot instance.
+- Encryption uses the account's default AWS-managed EBS KMS key (no customer-managed key configured in this stack).
 - Cloud-init formats/mounts the data disk at `/opt/openclaw` on first boot.
 - The data volume is tagged for DLM-managed scheduled snapshots with retention controls.
 - `pulumi destroy` deletes the data volume; recovery is snapshot-first (restore via `data_volume_snapshot_id`).

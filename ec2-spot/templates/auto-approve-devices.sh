@@ -4,26 +4,33 @@
 set -eu
 
 OPENCLAW_HOME="${1:-.}"
-DEVICES_DIR="$OPENCLAW_HOME/.openclaw/devices"
-PENDING_FILE="$DEVICES_DIR/pending.json"
+COMPOSE_FILE="$OPENCLAW_HOME/docker-compose.yaml"
 
-if [ ! -f "$PENDING_FILE" ]; then
-    echo "No pending device pairing requests found ($PENDING_FILE does not exist)"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "OpenClaw compose file not found at $COMPOSE_FILE"
     exit 0
 fi
 
-# Check if pending.json is empty or contains no requests
-if ! jq -e '.[] | select(.id)' "$PENDING_FILE" >/dev/null 2>&1; then
+cd "$OPENCLAW_HOME"
+
+list_json=$(docker compose run --rm openclaw-cli devices list --json 2>/dev/null || true)
+if [ -z "$list_json" ]; then
+    echo "No device pairing data returned"
+    exit 0
+fi
+
+request_ids=$(printf '%s\n' "$list_json" | jq -r '(.pending // [])[] | if type == "object" then (.requestId // .id // empty) else . end' 2>/dev/null || true)
+if [ -z "$request_ids" ]; then
     echo "No pending device pairing requests to approve"
     exit 0
 fi
 
 # Extract all request IDs and approve them
 echo "Auto-approving pending device pairing requests..."
-jq -r '.[] | select(.id) | .id' "$PENDING_FILE" | while read -r request_id; do
+printf '%s\n' "$request_ids" | while read -r request_id; do
     if [ -n "$request_id" ]; then
         echo "  Approving device pairing request: $request_id"
-        openclaw devices approve "$request_id" >/dev/null 2>&1 || echo "  Warning: Failed to approve $request_id"
+        docker compose run --rm openclaw-cli devices approve "$request_id" >/dev/null 2>&1 || echo "  Warning: Failed to approve $request_id"
     fi
 done
 

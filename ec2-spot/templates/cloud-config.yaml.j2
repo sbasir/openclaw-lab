@@ -15,11 +15,20 @@ bootcmd:
 
     mkdir -p "$OPENCLAW_HOME"
 
-    if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
-      DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
-    else
-      DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "$ROOT_DEVICE" | head -n1)
-    fi
+    DATA_DEVICE=""
+    for _ in $(seq 1 30); do
+      if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
+        DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
+      else
+        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "$ROOT_DEVICE" | head -n1)
+      fi
+
+      if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
+        break
+      fi
+
+      sleep 2
+    done
 
     if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
       if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
@@ -33,7 +42,8 @@ bootcmd:
 
       mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
     else
-      echo "WARNING: No data device found for $OPENCLAW_HOME; continuing without mounting a persistent volume." >&2
+      echo "ERROR: No data device found for $OPENCLAW_HOME after waiting; refusing to continue." >&2
+      exit 1
     fi
 
 # 1. Files to be created on the instance
@@ -113,6 +123,10 @@ runcmd:
 
   - |
     OPENCLAW_HOME="/opt/openclaw"
+    if ! mountpoint -q "$OPENCLAW_HOME"; then
+      echo "ERROR: $OPENCLAW_HOME is not mounted on the persistent data volume" >&2
+      exit 1
+    fi
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
