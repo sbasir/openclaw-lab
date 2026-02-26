@@ -11,16 +11,31 @@ bootcmd:
   - |
     OPENCLAW_HOME="/opt/openclaw"
     OPENCLAW_DATA_DEVICE="{{ openclaw_data_device_name }}"
-    ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p[0-9]\+$//')
-
     mkdir -p "$OPENCLAW_HOME"
+
+    ROOT_SOURCE=$(findmnt -n -o SOURCE /)
+    ROOT_PARENT=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || true)
+    if [ -n "$ROOT_PARENT" ]; then
+      ROOT_DEVICE="/dev/$ROOT_PARENT"
+    else
+      ROOT_DEVICE=$(echo "$ROOT_SOURCE" | sed 's/p[0-9]\+$//')
+    fi
 
     DATA_DEVICE=""
     for _ in $(seq 1 60); do
       if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
         DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
-      else
-        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "$ROOT_DEVICE" | head -n1)
+      fi
+
+      if [ -z "$DATA_DEVICE" ]; then
+        LABEL_DEVICE=$(blkid -L OPENCLAW_DATA 2>/dev/null || true)
+        if [ -n "$LABEL_DEVICE" ] && [ -b "$LABEL_DEVICE" ]; then
+          DATA_DEVICE="$LABEL_DEVICE"
+        fi
+      fi
+
+      if [ -z "$DATA_DEVICE" ]; then
+        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "^$ROOT_DEVICE$" | head -n1 || true)
       fi
 
       if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
@@ -31,26 +46,23 @@ bootcmd:
       sleep 5
     done
 
-    if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
-      if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
-        mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
-      fi
-
-      UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
-      if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
-        echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
-      fi
-
-      mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
-    else
-      echo "ERROR: No data device found for $OPENCLAW_HOME after waiting; refusing to continue." >&2
-      echo "Available block devices:" >&2
-      lsblk -pnro NAME,TYPE
-      echo "Expected data device: $OPENCLAW_DATA_DEVICE or any non-root disk" >&2
+    if [ -z "$DATA_DEVICE" ] || [ ! -b "$DATA_DEVICE" ]; then
+      echo "ERROR: No data device found for $OPENCLAW_HOME" >&2
+      lsblk -pnro NAME,TYPE >&2
       exit 1
     fi
 
-# 1. Files to be created on the instance
+    if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+      mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
+    fi
+
+    UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
+    if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
+      echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
+    fi
+
+    mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
+
 write_files:
   - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
     owner: root:root
@@ -115,12 +127,9 @@ write_files:
       [Install]
       WantedBy=timers.target
 
-# 2. Commands to run after files are written
 runcmd:
   - usermod -a -G docker ec2-user
 
-  # Install Docker Compose Binary
-  # We use the variables passed from Pulumi/Python
   - |
     mkdir -p /usr/local/lib/docker/cli-plugins
     CUR_ARCH=$(uname -m)
@@ -153,24 +162,19 @@ runcmd:
     fi
     chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
 
-  # Create symlink so docker-compose automatically finds .env in /run/openclaw
-  # This allows users to run docker-compose commands without --env-file flag
   - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
-  # Start Docker service
   - systemctl enable docker.service
   - systemctl start docker.service
 
   - systemctl daemon-reload
   - systemctl enable openclaw.service
   - systemctl start openclaw.service
-  # Auto-approve any pending device pairing requests (safe in dev environment with local-only SSH access)
   - sleep 5
   - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
 
-  # Enable periodic auto-approval of device pairing requests (runs every minute)
   - systemctl enable openclaw-auto-approve.service
   - systemctl enable openclaw-auto-approve.timer
   - systemctl start openclaw-auto-approve.timer

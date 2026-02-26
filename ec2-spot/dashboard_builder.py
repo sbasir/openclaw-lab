@@ -52,11 +52,11 @@ def _build_memory_widget(
             "period": 300,
             "metrics": [
                 [
-                    "CWAgent",
-                    "mem_used_percent",
+                    "OpenClawLab/EC2",
+                    "MEM_USED_PERCENT",
                     "InstanceId",
                     instance_id,
-                    {"stat": "Average", "label": "mem_used_percent"},
+                    {"stat": "Average", "label": "MEM_USED_PERCENT"},
                 ]
             ],
             "yAxis": {"left": {"min": 0, "max": 100}},
@@ -148,13 +148,15 @@ def _build_logs_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
         "height": 6,
         "properties": {
             "query": (
-                f"SOURCE '/aws/ec2/openclaw-lab/{instance_id}'\n"
-                "| fields @timestamp, @message\n"
+                "SOURCE '/aws/ec2/openclaw-lab'\n"
+                f"| filter @logStream like /{instance_id}\\/docker/\n"
+                "| filter @message like /[Oo]pen[Cc]law|[Gg]ateway|[Dd]evice|[Pp]air|ERROR|Error|error|WARN|Warn|warn|FAIL|Fail|fail/\n"
+                "| fields @timestamp, @logStream, @message\n"
                 "| sort @timestamp desc\n"
-                "| limit 20"
+                "| limit 50"
             ),
             "region": aws_region,
-            "title": "Recent Logs",
+            "title": "OpenClaw Container Logs (Filtered)",
         },
     }
 
@@ -242,28 +244,32 @@ def _build_ec2_disk_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
         "width": 8,
         "height": 6,
         "properties": {
-            "title": "EC2 Disk Operations",
+            "title": "Disk Used % (Root + Data)",
             "region": aws_region,
             "view": "timeSeries",
             "stacked": False,
             "period": 300,
             "metrics": [
                 [
-                    "AWS/EC2",
-                    "DiskReadOps",
+                    "OpenClawLab/EC2",
+                    "DISK_USED_PERCENT",
                     "InstanceId",
                     instance_id,
-                    {"stat": "Sum", "label": "DiskReadOps"},
+                    "path",
+                    "/",
+                    {"stat": "Average", "label": "Root /"},
                 ],
                 [
-                    "AWS/EC2",
-                    "DiskWriteOps",
+                    "OpenClawLab/EC2",
+                    "DISK_USED_PERCENT",
                     "InstanceId",
                     instance_id,
-                    {"stat": "Sum", "label": "DiskWriteOps"},
+                    "path",
+                    "/opt/openclaw",
+                    {"stat": "Average", "label": "Data /opt/openclaw"},
                 ],
             ],
-            "yAxis": {"left": {"min": 0}},
+            "yAxis": {"left": {"min": 0, "max": 100}},
         },
     }
 
@@ -276,25 +282,25 @@ def _build_ec2_disk_bytes_widget(instance_id: str, aws_region: str) -> dict[str,
         "width": 8,
         "height": 6,
         "properties": {
-            "title": "EC2 Disk Throughput (Bytes)",
+            "title": "Disk I/O (CWAgent)",
             "region": aws_region,
             "view": "timeSeries",
             "stacked": False,
             "period": 300,
             "metrics": [
                 [
-                    "AWS/EC2",
-                    "DiskReadBytes",
+                    "OpenClawLab/EC2",
+                    "DISK_READ_BYTES",
                     "InstanceId",
                     instance_id,
-                    {"stat": "Sum", "label": "DiskReadBytes"},
+                    {"stat": "Sum", "label": "DISK_READ_BYTES"},
                 ],
                 [
-                    "AWS/EC2",
-                    "DiskWriteBytes",
+                    "OpenClawLab/EC2",
+                    "DISK_WRITE_BYTES",
                     "InstanceId",
                     instance_id,
-                    {"stat": "Sum", "label": "DiskWriteBytes"},
+                    {"stat": "Sum", "label": "DISK_WRITE_BYTES"},
                 ],
             ],
             "yAxis": {"left": {"min": 0}},

@@ -79,7 +79,13 @@ def test_build_user_data_includes_data_device_name() -> None:
     )
 
     assert 'OPENCLAW_DATA_DEVICE="/dev/sdg"' in user_data
+    assert "ROOT_SOURCE=$(findmnt -n -o SOURCE /)" in user_data
+    assert (
+        'ROOT_PARENT=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || true)'
+        in user_data
+    )
     assert 'if [ -b "$OPENCLAW_DATA_DEVICE" ]; then' in user_data
+    assert "LABEL_DEVICE=$(blkid -L OPENCLAW_DATA 2>/dev/null || true)" in user_data
     assert 'DATA_DEVICE="$OPENCLAW_DATA_DEVICE"' in user_data
     assert 'mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"' in user_data
 
