@@ -16,7 +16,7 @@ bootcmd:
     mkdir -p "$OPENCLAW_HOME"
 
     DATA_DEVICE=""
-    for _ in $(seq 1 30); do
+    for _ in $(seq 1 60); do
       if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
         DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
       else
@@ -27,7 +27,8 @@ bootcmd:
         break
       fi
 
-      sleep 2
+      echo "Waiting for data device to be available..."
+      sleep 5
     done
 
     if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
@@ -43,6 +44,9 @@ bootcmd:
       mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
     else
       echo "ERROR: No data device found for $OPENCLAW_HOME after waiting; refusing to continue." >&2
+      echo "Available block devices:" >&2
+      lsblk -pnro NAME,TYPE
+      echo "Expected data device: $OPENCLAW_DATA_DEVICE or any non-root disk" >&2
       exit 1
     fi
 
@@ -71,12 +75,14 @@ write_files:
   - path: /opt/openclaw/auto-approve-devices.sh
     owner: ec2-user:ec2-user
     permissions: '0755'
+    defer: true
     content: |
       {{ auto_approve_devices_script | indent(width=6) }}
 
   - path: /etc/systemd/system/openclaw-auto-approve.service
     owner: root:root
     permissions: '0644'
+    defer: true
     content: |
       [Unit]
       Description=OpenClaw Device Pairing Auto-Approval
@@ -95,6 +101,7 @@ write_files:
   - path: /etc/systemd/system/openclaw-auto-approve.timer
     owner: root:root
     permissions: '0644'
+    defer: true
     content: |
       [Unit]
       Description=Run OpenClaw Device Pairing Auto-Approval Every Minute
@@ -130,16 +137,20 @@ runcmd:
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
+    if [ ! -f "$OPENCLAW_HOME/.openclaw/openclaw.json" ]; then
     cat > "$OPENCLAW_HOME/.openclaw/openclaw.json" <<-EOF
     {
       "gateway": {
         "controlUi": {
-          "dangerouslyAllowHostHeaderOriginFallback": true
+          "allowedOrigins": [
+            "http://localhost:18789",
+            "http://127.0.0.1:18789"
+          ]
         }
       }
     }
     EOF
-    chmod 600 "$OPENCLAW_HOME/.openclaw/openclaw.json"
+    fi
     chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
 
   # Create symlink so docker-compose automatically finds .env in /run/openclaw
@@ -160,5 +171,6 @@ runcmd:
   - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
 
   # Enable periodic auto-approval of device pairing requests (runs every minute)
+  - systemctl enable openclaw-auto-approve.service
   - systemctl enable openclaw-auto-approve.timer
   - systemctl start openclaw-auto-approve.timer
