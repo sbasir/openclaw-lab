@@ -67,9 +67,9 @@ Requires variables:
 
 ### 4. Infra Destroy (`infra-destroy.yaml`)
 **Triggers:** Manual workflow dispatch  
-**Purpose:** Destroy all infrastructure resources
+**Purpose:** Destroy `ec2-spot` infrastructure resources
 
-⚠️ **Warning:** This will permanently delete all infrastructure resources including EC2 instances, security groups, Elastic IPs, and IAM roles. This action cannot be undone.
+⚠️ **Warning:** This will permanently delete `ec2-spot` resources (EC2 instance, networking resources, EIP associations, and attached stack-managed resources). Platform resources are managed separately.
 
 Requires secrets:
 - `AWS_ROLE_ARN` - AWS IAM role ARN for OIDC authentication
@@ -126,7 +126,7 @@ There is a chicken and egg problem where the role needs to exist before the work
 2. Install Pulumi CLI and dependencies
 3. Deploy the Platform stack to create the IAM role:
    ```bash
-   make infra-platform-up
+   make platform-up
    ```
 
 ### 3. Configure GitHub Secrets and Variables
@@ -134,7 +134,7 @@ There is a chicken and egg problem where the role needs to exist before the work
 ** Browser **
 Go to repository settings → Secrets and variables → Actions
 
-** Github CLI **
+** GitHub CLI **
 ```bash
 # Add secrets
 gh secret set <Secret Name> -r <Repo Org>/<Repo Name> --body "<Secret Value>"
@@ -165,11 +165,12 @@ If stacks don't exist, create them:
 
 #### Local
 ```bash
-# Create ec2-spot stack
-make infra-ec2-spot-up
+# Create/deploy ec2-spot stack
+make ec2-spot-up
 
-# Create platform stack
-make infra-platform-up
+# Create/deploy platform stack
+make platform-up
+```
 
 ### 5. Configure Environment Protection (Optional but Recommended)
 
@@ -221,7 +222,7 @@ make ci
 
 ### Destroy Infrastructure
 
-⚠️ **Warning:** This will permanently delete all infrastructure resources.
+⚠️ **Warning:** This destroys `ec2-spot` resources for the selected stack.
 
 1. Go to Actions → "Infra Destroy" workflow
 2. Click "Run workflow"

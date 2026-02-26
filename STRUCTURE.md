@@ -44,6 +44,7 @@ openclaw-lab/
 
 ```
 ec2-spot/
+├── dashboard_builder.py          # CloudWatch dashboard widget builders and body assembly
 ├── templates/                    # Jinja2 templates for cloud-init
 │   ├── auto-approve-devices.sh   # Helper script for auto-approving device pairings
 │   ├── cloud-config.yaml.j2      # Main cloud-init configuration (Jinja2 template)
@@ -78,7 +79,14 @@ Contains the complete infrastructure definition:
 - Data Lifecycle Manager (DLM) policy for automated snapshots
 - IAM roles and instance profile (SSM, ECR, CloudWatch, Parameter Store access)
 - Cross-stack reference to platform stack for ECR URL
-- CloudWatch Dashboard with 20+ observability widgets
+- CloudWatch Dashboard resource wired to `dashboard_builder.py`
+
+#### `dashboard_builder.py` - Dashboard Builders
+Pure-Python CloudWatch dashboard composition:
+- Metric and log widget definitions
+- Namespaced metrics for `AWS/EC2`, `AWS/EBS`, `AWS/SSM`, and `OpenClawLab/EC2`
+- Log Insights query targeting stable log group `/aws/ec2/openclaw-lab`
+- JSON dashboard body assembly consumed by `aws.cloudwatch.Dashboard`
 
 #### `network_helpers.py` - Network Utilities
 Pure-Python functions for CIDR calculations:
@@ -110,7 +118,7 @@ Detailed architecture notes:
 
 #### `DASHBOARD.md` - CloudWatch Dashboard Guide
 Comprehensive observability documentation:
-- 8-section dashboard layout with 20+ widgets
+- Current dashboard layout and widget inventory sourced from `dashboard_builder.py`
 - Detailed metric explanations and thresholds
 - Widget categories (CPU, Memory, Disk, Network, EBS, SSM)
 - CloudWatch Logs Insights query guide
@@ -121,11 +129,15 @@ Comprehensive observability documentation:
 #### `cloud-config.yaml.j2` - Main Cloud-Init Script
 Multi-stage cloud-init configuration:
 1. Install Docker Compose, CloudWatch agent, jq
-2. Format and mount EBS data volume at `/opt/openclaw`
+2. Mount EBS data volume at `/opt/openclaw` in `bootcmd` before deferred writes
 3. Configure and start CloudWatch agent
 4. Write systemd service file for OpenClaw
 5. Fetch secrets from SSM Parameter Store into `/run/openclaw/.env`
 6. Pull Docker images from ECR and start OpenClaw via Docker Compose
+
+Notes:
+- EC2 attachment name (for example `/dev/sdf`) may appear as `/dev/nvme*` in guest OS on Nitro instances.
+- Device detection uses configured name + filesystem label + non-root fallback.
 
 #### `openclaw-service.conf` - Systemd Service
 Systemd service unit for OpenClaw:
@@ -142,9 +154,9 @@ Docker Compose definition for OpenClaw containers:
 
 #### `cloudwatch-agent-config.json` - CloudWatch Config
 CloudWatch agent configuration:
-- Log collection from `/var/log/cloud-init-output.log`
-- System metrics (CPU, memory, disk)
-- Custom namespace for OpenClaw metrics
+- Custom metrics in namespace `OpenClawLab/EC2`
+- Aggregation dimensions include `InstanceId` and `path`
+- Log collection into stable group `/aws/ec2/openclaw-lab` with instance-scoped streams
 
 #### `auto-approve-devices.sh` - Device Auto-Approval Helper
 Bash script to automatically approve pending OpenClaw device pairing requests:
@@ -263,55 +275,25 @@ Python project configuration:
 6. **SSM-Only Access**: No SSH keys or open inbound ports; access via AWS Systems Manager
 7. **Strict Type Checking**: mypy in strict mode for all Python code
 8. **Testable Code**: Unit tests for all pure-Python logic
-9. **Comprehensive Observability**: CloudWatch Dashboard with 20+ widgets for full stack visibility
+9. **Comprehensive Observability**: CloudWatch Dashboard with modular widgets for full stack visibility
 
 ## CloudWatch Dashboard
 
-The stack automatically creates a comprehensive CloudWatch Dashboard named `openclaw-lab-observability` with the following widget categories:
+The stack creates CloudWatch dashboard `openclaw-lab-observability` from `dashboard_builder.py`.
 
-### Dashboard Organization (8 Rows)
+Current widget coverage:
+- EC2 CPU utilization
+- OpenClaw memory (`MEM_USED_PERCENT`)
+- EC2 status checks
+- EC2 network I/O
+- Filtered OpenClaw container logs (CloudWatch Logs Insights)
+- EBS throughput and operations
+- Disk used % for `/` and `/opt/openclaw`
+- Disk I/O bytes (OpenClaw custom metrics)
+- SSM command status
+- EBS performance indicators (throughput %, consumed IOPS, idle time)
 
-1. **Header & Status** (Row 1)
-   - Instance metadata and stack information
-   - EC2 status checks (instance and system)
-   - Current CPU, memory, and disk usage (single value widgets)
-   - Recent errors and warnings from CloudWatch Logs
-
-2. **CPU Performance** (Row 2)
-   - Stacked CPU usage breakdown (user, system, iowait, idle)
-   - EC2 hypervisor CPU utilization (min/avg/max)
-   - High CPU threshold annotations at 80%
-
-3. **Memory Performance** (Row 3)
-   - Memory usage percentages (used vs. available)
-   - Absolute memory values in bytes
-   - High memory threshold annotations at 80%
-
-4. **Disk Usage** (Row 4)
-   - Disk space usage for root (/) and data (/opt/openclaw) volumes
-   - Inode usage tracking
-   - EBS volume throughput (read/write bytes)
-   - High disk usage threshold annotations at 80%
-
-5. **Disk I/O Performance** (Row 5)
-   - Disk I/O operations (read/write counts)
-   - Disk I/O throughput (bytes)
-   - Disk I/O time in milliseconds
-
-6. **Network Performance** (Rows 6)
-   - Network throughput (bytes sent/received)
-   - Network packets sent/received
-   - EC2 hypervisor network view
-   - TCP connection states (established, time_wait)
-
-7. **Systems Manager** (Row 7)
-   - SSM command execution status (succeeded/failed/timed out)
-   - Application and service logs via CloudWatch Logs Insights
-
-8. **EBS & Spot Instance** (Row 8)
-   - EBS volume operations (read/write ops)
-   - EBS performance metrics (queue length, throughput %, consumed IOPS)
-   - EBS volume idle time
+For detailed and current dashboard behavior, see `ec2-spot/DASHBOARD.md`.
 
 ### Accessing the Dashboard
 

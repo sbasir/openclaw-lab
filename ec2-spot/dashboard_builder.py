@@ -379,10 +379,11 @@ def create_minimal_dashboard_body(
     aws_region: str,
     stack_name: str,
 ) -> str:
-    """Create a minimal, known-good dashboard body with one metric widget.
+    """Create a minimal, known-good CloudWatch dashboard body with multiple widgets.
 
-    This is intentionally small to validate schema correctness before incrementally
-    adding more widgets.
+    The dashboard includes key categories (CPU, memory, network, disk, EBS, SSM, and
+    logs) and is intentionally kept small and well-defined to validate schema
+    correctness before incrementally adding more widgets.
     """
     body = {
         "widgets": [

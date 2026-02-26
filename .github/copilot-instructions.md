@@ -64,7 +64,7 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 - **Comprehensive metrics**: CPU, memory, disk, network, EBS, SSM, and logs
 - **Custom namespace**: CloudWatch agent publishes to `OpenClawLab/EC2`
 - **Access**: Via `dashboard_url` stack output or AWS Console
-- **Widgets**: 20+ widgets organized by category (CPU, Memory, Disk, Network, EBS, SSM)
+- **Widgets**: Modular widget builders in `dashboard_builder.py` (CPU, memory, disk, network, EBS, SSM, logs)
 - **Log insights**: Integration with CloudWatch Logs for error/warning detection
 
 ## Development Workflows

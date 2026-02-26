@@ -88,8 +88,9 @@ This keeps state durable while reducing secret persistence in retained volumes/s
 flowchart TD
   A[Pulumi Up] --> B[Create Spot Instance]
   A --> C[Create Data EBS Volume]
-  C --> D[Attach /dev/sdf]
-  D --> E[cloud-init mounts /opt/openclaw]
+  C --> D[Attach requested device name /dev/sdf]
+  D --> D2[Guest OS may expose as /dev/nvme*n* on Nitro]
+  D2 --> E[cloud-init mounts /opt/openclaw]
   E --> F[openclaw.service starts]
   F --> G[ECR login + compose pull/up]
 
