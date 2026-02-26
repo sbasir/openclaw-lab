@@ -58,6 +58,15 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 - **Snapshots**: DLM-managed with configurable schedule (default: 24h) and retention (default: 30 days)
 - **Recovery**: Set `data_volume_snapshot_id` in stack config, re-deploy to restore
 
+### 4. CloudWatch Observability Dashboard
+
+- **Automatic creation**: Dashboard created for each stack deployment
+- **Comprehensive metrics**: CPU, memory, disk, network, EBS, SSM, and logs
+- **Custom namespace**: CloudWatch agent publishes to `OpenClawLab/EC2`
+- **Access**: Via `dashboard_url` stack output or AWS Console
+- **Widgets**: 20+ widgets organized by category (CPU, Memory, Disk, Network, EBS, SSM)
+- **Log insights**: Integration with CloudWatch Logs for error/warning detection
+
 ## Development Workflows
 
 ### Installation & Setup
@@ -207,3 +216,4 @@ For a complete file-by-file reference, see [STRUCTURE.md](../STRUCTURE.md).
 - [STRUCTURE.md](../STRUCTURE.md): Comprehensive file structure reference
 - [WORKFLOWS.md](WORKFLOWS.md): GitHub Actions workflow documentation
 - [ec2-spot/ARCHITECTURE.md](../ec2-spot/ARCHITECTURE.md): Architecture notes and operational runbook
+- [ec2-spot/DASHBOARD.md](../ec2-spot/DASHBOARD.md): CloudWatch Dashboard observability guide

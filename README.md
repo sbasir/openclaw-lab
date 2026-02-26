@@ -77,6 +77,26 @@ make ci         # Run all CI checks (lint, mypy, format, test)
 - CloudWatch agent installed and configured for log collection and metrics
 - Auto-approve devices script available at `/opt/openclaw/auto-approve-devices.sh`
 
+## Observability
+
+A comprehensive CloudWatch Dashboard is automatically created for each stack deployment:
+
+- **CPU metrics**: User, System, IOWait, Idle (stacked and hypervisor views)
+- **Memory metrics**: Usage percentages and absolute values
+- **Disk metrics**: Space usage for root and data volumes, inode usage
+- **Disk I/O**: Operations, throughput, and I/O time
+- **Network metrics**: Bytes/packets sent/received, TCP connection states
+- **EBS performance**: Volume operations, queue length, throughput percentage
+- **SSM connectivity**: Command execution status
+- **CloudWatch Logs**: Error/warning filtering and application logs
+
+Access the dashboard via the `dashboard_url` stack output:
+```bash
+make ec2-spot-output
+# or directly:
+cd ec2-spot && pulumi stack output dashboard_url
+```
+
 ## Persistent Data Volume (EC2 Spot stack)
 
 Pulumi config values for `ec2-spot` stack (`availability_zone` is required; others optional):

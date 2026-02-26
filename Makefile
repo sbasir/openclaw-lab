@@ -251,6 +251,19 @@ openclaw-devices-approve-all: ## Helpful: Auto-approve all pending OpenClaw devi
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw']" --region $(REGION)
 
+openclaw-dashboard: ## Helpful: Open CloudWatch Dashboard in browser
+	@cd ec2-spot && \
+	dashboard_url=$$($(PULUMI) stack output dashboard_url) && \
+	if [ -z "$$dashboard_url" ]; then echo "No dashboard_url in stack outputs. Deploy the stack first."; exit 1; fi; \
+	echo "Opening dashboard: $$dashboard_url"; \
+	if command -v open >/dev/null 2>&1; then \
+		open "$$dashboard_url"; \
+	elif command -v xdg-open >/dev/null 2>&1; then \
+		xdg-open "$$dashboard_url"; \
+	else \
+		echo "$$dashboard_url"; \
+	fi
+
 aws-describe-images: ## Helpful: List available Amazon Linux 2023 AMIs
 	@$(AWS) ec2 describe-images --owners amazon \
 	  --filters "Name=name,Values=al2023-ami-2023*-arm64" \
