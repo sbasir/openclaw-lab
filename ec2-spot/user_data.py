@@ -3,6 +3,7 @@
 from template_helpers import load_template_source, render_template
 
 DEFAULT_COMPOSE_VERSION = "v5.0.2"
+DEFAULT_OPENCLAW_DATA_DEVICE_NAME = "/dev/sdf"
 
 
 def extract_ecr_registry_domain(ecr_repository_url: str) -> str:
@@ -26,7 +27,11 @@ def extract_ecr_registry_domain(ecr_repository_url: str) -> str:
     return registry_domain
 
 
-def build_user_data(aws_region: str, ecr_repository_url: str) -> str:
+def build_user_data(
+    aws_region: str,
+    ecr_repository_url: str,
+    openclaw_data_device_name: str = DEFAULT_OPENCLAW_DATA_DEVICE_NAME,
+) -> str:
     """Return the cloud-init script used to bootstrap the instance.
 
     Parameters
@@ -37,12 +42,19 @@ def build_user_data(aws_region: str, ecr_repository_url: str) -> str:
 
     registry_domain = extract_ecr_registry_domain(ecr_repository_url)
 
+    service_context = {
+        "aws_region": aws_region,
+        "ecr_registry_domain": registry_domain,
+    }
+
     context = {
         "compose_version": DEFAULT_COMPOSE_VERSION,
         "cloudwatch_agent_config": load_template_source("cloudwatch-agent-config.json"),
         "docker_compose_config": load_template_source("docker-compose.yaml"),
-        "docker_compose_service": load_template_source("docker-service.conf"),
+        "auto_approve_devices_script": load_template_source("auto-approve-devices.sh"),
+        "openclaw_service": render_template("openclaw-service.conf", service_context),
         "aws_region": aws_region,
         "ecr_registry_domain": registry_domain,
+        "openclaw_data_device_name": openclaw_data_device_name,
     }
     return render_template("cloud-config.yaml.j2", context)

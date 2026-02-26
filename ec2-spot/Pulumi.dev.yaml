@@ -1,3 +1,5 @@
 config:
   aws:region: me-central-1
   openclaw-lab:ami: ami-076988f456083409b
+  openclaw-lab:availability_zone: me-central-1b
+  openclaw-lab:instance_type: m8g.medium

@@ -5,9 +5,24 @@
   },
   "metrics": {
     "namespace": "OpenClawLab/EC2",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}",
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}"
+    },
     "metrics_collected": {
       "cpu": {
         "measurement": [
+          {
+            "name": "cpu_usage_user",
+            "rename": "CPU_USER",
+            "unit": "Percent"
+          },
+          {
+            "name": "cpu_usage_system",
+            "rename": "CPU_SYSTEM",
+            "unit": "Percent"
+          },
           {
             "name": "cpu_usage_idle",
             "rename": "CPU_IDLE",
@@ -20,30 +35,140 @@
           }
         ],
         "metrics_collection_interval": 60,
-        "totalcpu": false
+        "totalcpu": true,
+        "resources": [
+          "*"
+        ]
       },
       "disk": {
         "measurement": [
           {
             "name": "used_percent",
-            "rename": "DISK_USED",
+            "rename": "DISK_USED_PERCENT",
             "unit": "Percent"
+          },
+          {
+            "name": "inodes_free",
+            "rename": "INODE_FREE",
+            "unit": "Count"
+          },
+          {
+            "name": "inodes_used",
+            "rename": "INODE_USED",
+            "unit": "Count"
           }
         ],
         "metrics_collection_interval": 60,
         "resources": [
-          "/"
+          "/",
+          "/opt/openclaw"
+        ],
+        "ignore_file_system_types": [
+          "sysfs",
+          "devtmpfs",
+          "tmpfs"
+        ]
+      },
+      "diskio": {
+        "measurement": [
+          {
+            "name": "io_time",
+            "rename": "DISK_IO_TIME",
+            "unit": "Milliseconds"
+          },
+          {
+            "name": "reads",
+            "rename": "DISK_READ_OPS",
+            "unit": "Count"
+          },
+          {
+            "name": "writes",
+            "rename": "DISK_WRITE_OPS",
+            "unit": "Count"
+          },
+          {
+            "name": "read_bytes",
+            "rename": "DISK_READ_BYTES",
+            "unit": "Bytes"
+          },
+          {
+            "name": "write_bytes",
+            "rename": "DISK_WRITE_BYTES",
+            "unit": "Bytes"
+          }
+        ],
+        "metrics_collection_interval": 60,
+        "resources": [
+          "*"
         ]
       },
       "mem": {
         "measurement": [
           {
             "name": "mem_used_percent",
-            "rename": "MEM_USED",
+            "rename": "MEM_USED_PERCENT",
             "unit": "Percent"
+          },
+          {
+            "name": "mem_available_percent",
+            "rename": "MEM_AVAILABLE_PERCENT",
+            "unit": "Percent"
+          },
+          {
+            "name": "mem_used",
+            "rename": "MEM_USED_BYTES",
+            "unit": "Bytes"
+          },
+          {
+            "name": "mem_available",
+            "rename": "MEM_AVAILABLE_BYTES",
+            "unit": "Bytes"
           }
         ],
         "metrics_collection_interval": 60
+      },
+      "netstat": {
+        "measurement": [
+          {
+            "name": "tcp_established",
+            "rename": "TCP_ESTABLISHED",
+            "unit": "Count"
+          },
+          {
+            "name": "tcp_time_wait",
+            "rename": "TCP_TIME_WAIT",
+            "unit": "Count"
+          }
+        ],
+        "metrics_collection_interval": 60
+      },
+      "net": {
+        "measurement": [
+          {
+            "name": "bytes_sent",
+            "rename": "NET_BYTES_SENT",
+            "unit": "Bytes"
+          },
+          {
+            "name": "bytes_recv",
+            "rename": "NET_BYTES_RECV",
+            "unit": "Bytes"
+          },
+          {
+            "name": "packets_sent",
+            "rename": "NET_PACKETS_SENT",
+            "unit": "Count"
+          },
+          {
+            "name": "packets_recv",
+            "rename": "NET_PACKETS_RECV",
+            "unit": "Count"
+          }
+        ],
+        "metrics_collection_interval": 60,
+        "resources": [
+          "*"
+        ]
       }
     }
   }

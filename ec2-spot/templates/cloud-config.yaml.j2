@@ -7,6 +7,49 @@ packages:
   - awscli
   - amazon-cloudwatch-agent
 
+bootcmd:
+  - |
+    OPENCLAW_HOME="/opt/openclaw"
+    OPENCLAW_DATA_DEVICE="{{ openclaw_data_device_name }}"
+    ROOT_DEVICE=$(findmnt -n -o SOURCE / | sed 's/p[0-9]\+$//')
+
+    mkdir -p "$OPENCLAW_HOME"
+
+    DATA_DEVICE=""
+    for _ in $(seq 1 60); do
+      if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
+        DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
+      else
+        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "$ROOT_DEVICE" | head -n1)
+      fi
+
+      if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
+        break
+      fi
+
+      echo "Waiting for data device to be available..."
+      sleep 5
+    done
+
+    if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
+      if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+        mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
+      fi
+
+      UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
+      if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
+        echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
+      fi
+
+      mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
+    else
+      echo "ERROR: No data device found for $OPENCLAW_HOME after waiting; refusing to continue." >&2
+      echo "Available block devices:" >&2
+      lsblk -pnro NAME,TYPE
+      echo "Expected data device: $OPENCLAW_DATA_DEVICE or any non-root disk" >&2
+      exit 1
+    fi
+
 # 1. Files to be created on the instance
 write_files:
   - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
@@ -15,19 +58,62 @@ write_files:
     content: |
       {{ cloudwatch_agent_config | indent(width=6) }}
 
-  - path: /home/ec2-user/docker-compose.yaml
+  - path: /opt/openclaw/docker-compose.yaml
     owner: ec2-user:ec2-user
     permissions: '0644'
     defer: true
     content: |
       {{ docker_compose_config | indent(width=6) }}
 
-  - path: /etc/systemd/system/docker-compose.service
+  - path: /etc/systemd/system/openclaw.service
     owner: root:root
     permissions: '0644'
     defer: true
     content: |
-      {{ docker_compose_service | indent(width=6) }}
+      {{ openclaw_service | indent(width=6) }}
+
+  - path: /opt/openclaw/auto-approve-devices.sh
+    owner: ec2-user:ec2-user
+    permissions: '0755'
+    defer: true
+    content: |
+      {{ auto_approve_devices_script | indent(width=6) }}
+
+  - path: /etc/systemd/system/openclaw-auto-approve.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw Device Pairing Auto-Approval
+      After=openclaw.service
+      Requires=openclaw.service docker.service
+      
+      [Service]
+      Type=oneshot
+      User=ec2-user
+      ExecStart=/opt/openclaw/auto-approve-devices.sh /opt/openclaw
+      SyslogIdentifier=openclaw-auto-approve
+      
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-auto-approve.timer
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=Run OpenClaw Device Pairing Auto-Approval Every Minute
+      Requires=openclaw-auto-approve.service
+      
+      [Timer]
+      OnBootSec=10s
+      OnUnitActiveSec=1min
+      Persistent=true
+      
+      [Install]
+      WantedBy=timers.target
 
 # 2. Commands to run after files are written
 runcmd:
@@ -43,51 +129,48 @@ runcmd:
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
   - |
-    mkdir -p /home/ec2-user/.openclaw/workspace
-    chmod 700 /home/ec2-user/.openclaw
-    chmod 700 /home/ec2-user/.openclaw/workspace
-    echo '{}' > /home/ec2-user/.openclaw/openclaw.json
-    chmod 600 /home/ec2-user/.openclaw/openclaw.json
-    chown -R 1000:1000 /home/ec2-user/.openclaw
+    OPENCLAW_HOME="/opt/openclaw"
+    if ! mountpoint -q "$OPENCLAW_HOME"; then
+      echo "ERROR: $OPENCLAW_HOME is not mounted on the persistent data volume" >&2
+      exit 1
+    fi
+    mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
+    chmod 700 "$OPENCLAW_HOME/.openclaw"
+    chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
+    if [ ! -f "$OPENCLAW_HOME/.openclaw/openclaw.json" ]; then
+    cat > "$OPENCLAW_HOME/.openclaw/openclaw.json" <<-EOF
+    {
+      "gateway": {
+        "controlUi": {
+          "allowedOrigins": [
+            "http://localhost:18789",
+            "http://127.0.0.1:18789"
+          ]
+        }
+      }
+    }
+    EOF
+    fi
+    chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
+
+  # Create symlink so docker-compose automatically finds .env in /run/openclaw
+  # This allows users to run docker-compose commands without --env-file flag
+  - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
-
-  - |
-    ENV_FILE="/home/ec2-user/.env"
-    TMP_ENV_FILE="${ENV_FILE}.tmp"
-
-    # Retrieve dotenv contents from SSM Parameter Store into a temporary file
-    aws ssm get-parameter \
-      --name '/openclaw-lab/dotenv' \
-      --with-decryption \
-      --region {{ aws_region }} \
-      --query 'Parameter.Value' \
-      --output text > "$TMP_ENV_FILE"
-
-    if [ $? -ne 0 ]; then
-      echo "ERROR: Failed to retrieve SSM parameter '/openclaw-lab/dotenv'. Check IAM permissions, region, and parameter existence." >&2
-      rm -f "$TMP_ENV_FILE"
-      exit 1
-    fi
-
-    if [ ! -s "$TMP_ENV_FILE" ]; then
-      echo "ERROR: Retrieved SSM parameter '/openclaw-lab/dotenv' is empty. Refusing to overwrite $ENV_FILE." >&2
-      rm -f "$TMP_ENV_FILE"
-      exit 1
-    fi
-
-    mv "$TMP_ENV_FILE" "$ENV_FILE"
-    chown ec2-user:ec2-user "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-    chmod 600 /home/ec2-user/.env
 
   # Start Docker service
   - systemctl enable docker.service
   - systemctl start docker.service
 
-  # Login to ECR (requires Docker running)
-  - echo "Logging into ECR..."
-  - aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry_domain }}
+  - systemctl daemon-reload
+  - systemctl enable openclaw.service
+  - systemctl start openclaw.service
+  # Auto-approve any pending device pairing requests (safe in dev environment with local-only SSH access)
+  - sleep 5
+  - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
 
-  - systemctl enable docker-compose.service
-  - systemctl start docker-compose.service
+  # Enable periodic auto-approval of device pairing requests (runs every minute)
+  - systemctl enable openclaw-auto-approve.service
+  - systemctl enable openclaw-auto-approve.timer
+  - systemctl start openclaw-auto-approve.timer

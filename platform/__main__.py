@@ -25,6 +25,7 @@ if not github_repo:
     )
 
 account_id = aws.get_caller_identity().account_id
+aws_region = aws.get_region().region
 
 # =============================================================================
 # GitHub Actions OIDC Provider
@@ -304,6 +305,72 @@ ecr_policy_attachment = aws.iam.RolePolicyAttachment(
     f"{prefix}-ecr-policy",
     role=github_actions_role.name,
     policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser",
+)
+
+# EC2 Volume permissions: manage EBS volumes for persistent storage.
+ec2_volume_policy = aws.iam.RolePolicy(
+    f"{prefix}-ec2-volume-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "EC2VolumeManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:CreateVolume",
+                        "ec2:DeleteVolume",
+                        "ec2:AttachVolume",
+                        "ec2:DetachVolume",
+                        "ec2:DescribeVolumes",
+                    ],
+                    "Resource": [
+                        f"arn:aws:ec2:{aws_region}:{account_id}:volume/*",
+                        f"arn:aws:ec2:{aws_region}:{account_id}:instance/*",
+                    ],
+                },
+                {
+                    "Sid": "EC2SnapshotManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ec2:CreateSnapshot",
+                        "ec2:DeleteSnapshot",
+                        "ec2:DescribeSnapshots",
+                        "ec2:CreateTags",
+                    ],
+                    "Resource": "*",
+                },
+            ],
+        }
+    ),
+)
+
+# DLM permissions: manage machine images for the EC2 instance.
+dlm_policy = aws.iam.RolePolicy(
+    f"{prefix}-dlm-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "DLMImageManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "dlm:GetLifecyclePolicies",
+                        "dlm:CreateLifecyclePolicy",
+                        "dlm:DeleteLifecyclePolicy",
+                        "dlm:GetLifecyclePolicy",
+                        "dlm:UpdateLifecyclePolicy",
+                        "dlm:ListTagsForResource",
+                        "dlm:TagResource",
+                    ],
+                    "Resource": f"arn:aws:dlm:{aws_region}:{account_id}:policy/*",
+                },
+            ],
+        }
+    ),
 )
 
 # =============================================================================
