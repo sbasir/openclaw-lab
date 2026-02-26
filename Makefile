@@ -22,15 +22,17 @@ ACT_INFRA_FLAGS = -s PULUMI_ACCESS_TOKEN=$(PULUMI_ACCESS_TOKEN) \
 	--var AWS_REGION=$(AWS_REGION) \
 	--input stack=$(STACK)
 
-# AUTO_APPROVE controls whether ``--yes`` is added to pulumi commands.  Set
-# it to ``true`` or ``yes`` (case-sensitive) when running in CI or any
-# non-interactive context; the default is ``false`` which leaves Pulumi in
-# preview mode so you must manually confirm changes.
+# AUTO_APPROVE controls whether `--yes` is added to Pulumi commands. Set
+# it to `true` or `yes` (case-sensitive) when running in CI or any
+# non-interactive context. The default is `false`, which requires manual
+# confirmation of changes during `pulumi up` and `pulumi destroy`.
 AUTO_APPROVE ?= false
-# treat either "true" or "yes" (case-sensitive) as approval
+# treat either "true" or "yes" (case-sensitive) as approval signal
 APPROVE_FLAGS := $(if $(filter $(AUTO_APPROVE),true yes),--yes,)
 
-# Auto-load a local .env file if present (convenience). `.env` should NOT be committed.
+# Auto-load a local .env file if present (for convenience).
+# IMPORTANT: `.env` should NEVER be committed to version control.
+# Use it for local development environment variables only.
 ifneq (,$(wildcard .env))
 # Capture variables defined before loading .env
 ENV_PRE_VARS := $(.VARIABLES)
@@ -248,6 +250,19 @@ openclaw-devices-approve-all: ## Helpful: Auto-approve all pending OpenClaw devi
 	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw']" --region $(REGION)
+
+openclaw-dashboard: ## Helpful: Open CloudWatch Dashboard in browser
+	@cd ec2-spot && \
+	dashboard_url=$$($(PULUMI) stack output dashboard_url) && \
+	if [ -z "$$dashboard_url" ]; then echo "No dashboard_url in stack outputs. Deploy the stack first."; exit 1; fi; \
+	echo "Opening dashboard: $$dashboard_url"; \
+	if command -v open >/dev/null 2>&1; then \
+		open "$$dashboard_url"; \
+	elif command -v xdg-open >/dev/null 2>&1; then \
+		xdg-open "$$dashboard_url"; \
+	else \
+		echo "$$dashboard_url"; \
+	fi
 
 aws-describe-images: ## Helpful: List available Amazon Linux 2023 AMIs
 	@$(AWS) ec2 describe-images --owners amazon \
