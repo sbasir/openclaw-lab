@@ -376,6 +376,30 @@ dlm_policy = aws.iam.RolePolicy(
     ),
 )
 
+# CloudWatch permissions: manage CloudWatch Dashboards for observability.
+cloudwatch_policy = aws.iam.RolePolicy(
+    f"{prefix}-cloudwatch-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "CloudWatchDashboardManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "cloudwatch:PutDashboard",
+                        "cloudwatch:GetDashboard",
+                        "cloudwatch:DeleteDashboards",
+                        "cloudwatch:ListDashboards",
+                    ],
+                    "Resource": "*",
+                },
+            ],
+        }
+    ),
+)
+
 # =============================================================================
 # Private ECR Repository
 # =============================================================================
