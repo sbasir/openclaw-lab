@@ -8,10 +8,19 @@ Infrastructure-as-code for running OpenClaw on AWS using:
 
 ## Repository Structure
 
-- `ec2-spot/`: Pulumi program for VPC/networking, security group, IAM instance profile, Spot instance, and EIP
+- `ec2-spot/`: Pulumi program for VPC/networking, security group, IAM instance profile, Spot instance, EBS data volume, and EIP
+  - `templates/`: Jinja2 templates for cloud-init, systemd service, Docker Compose, and CloudWatch configuration
+  - `tests/`: Unit tests for pure-Python helpers
+  - Pure-Python helpers: `network_helpers.py`, `template_helpers.py`, `user_data.py`
+  - `ARCHITECTURE.md`: Data/secret persistence architecture and runbook
 - `platform/`: Pulumi program for GitHub OIDC deploy role and ECR repository
-- `.github/workflows/`: CI/CD workflows
+- `.github/workflows/`: CI/CD workflows for lint, test, preview, deploy, and image publishing
+  - `WORKFLOWS.md`: Detailed workflow documentation and setup instructions
 - `Makefile`: Local developer and operations commands
+- `scripts/`: Helper scripts for operational tasks
+- `STRUCTURE.md`: Comprehensive file structure reference
+
+For a detailed explanation of each file and directory, see [STRUCTURE.md](STRUCTURE.md).
 
 ## Prerequisites
 
@@ -60,11 +69,13 @@ make ci         # Run all CI checks (lint, mypy, format, test)
 
 ## Runtime Layout (EC2)
 
-- OpenClaw runtime home is `/opt/openclaw` (compose file and state)
+- OpenClaw runtime home is `/opt/openclaw` (compose file, state, and workspace)
 - systemd service name is `openclaw.service`
 - Docker/ECR login is performed in service pre-start as `ec2-user`
-- OpenClaw state path is `/opt/openclaw/.openclaw` (suitable for a detachable data volume)
-- Runtime secrets file is `/run/openclaw/.env` (re-hydrated from SSM at service start)
+- OpenClaw state path is `/opt/openclaw/.openclaw` (persisted on dedicated EBS data volume)
+- Runtime secrets file is `/run/openclaw/.env` (re-hydrated from SSM Parameter Store at service start)
+- CloudWatch agent installed and configured for log collection and metrics
+- Auto-approve devices script available at `/opt/openclaw/auto-approve-devices.sh`
 
 ## Persistent Data Volume (EC2 Spot stack)
 
@@ -110,8 +121,11 @@ make help
 Detailed workflow documentation is in `.github/WORKFLOWS.md`.
 
 ## Security Notes
-
-- Uses AWS OIDC for GitHub Actions (no long-lived AWS keys in CI)
-- Enforces IMDSv2 on EC2 instance metadata
+ (http_tokens="required")
+- Root EBS volume and data volumes are encrypted (uses AWS-managed EBS KMS key)
+- SSM Parameter Store is used for runtime secrets (SecureString type for `.env` payload)
+- Least-privilege IAM roles for EC2 instance (SSM, ECR read-only, CloudWatch, Parameter Store)
+- Security groups restrict all inbound traffic (access via SSM Session Manager only)
+- IPv6 support with egress-only rules
 - Root EBS volume is encrypted
 - Parameter Store is used for runtime secrets (for example `.env` payload)

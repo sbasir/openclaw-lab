@@ -9,9 +9,11 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack a
 - Runtime artifacts under `/opt/openclaw` are persisted, including:
   - `docker-compose.yaml`
   - `.openclaw/` state
+  - `auto-approve-devices.sh` helper script
 - Runtime secrets are generated at service start under `/run/openclaw/.env`.
 - Data volume is tagged for AWS DLM snapshots with retention controls.
 - Volume lifecycle is snapshot-first; data volume itself is not retained on destroy.
+- CloudWatch agent is installed and configured for log collection and metrics monitoring.
 
 ## Snapshot-first model (current direction)
 

@@ -1,4 +1,16 @@
-"""An AWS Python Pulumi program"""
+"""EC2 Spot infrastructure for OpenClaw Lab.
+
+This stack manages ephemeral compute resources:
+  - VPC with multi-AZ public subnets (IPv4 + IPv6)
+  - Internet Gateway and Route Tables
+  - Security groups (SSM-only access, no inbound ports)
+  - EC2 Spot instance with persistent request
+  - Elastic IP for stable public addressing
+  - EBS data volume with DLM-managed snapshots
+  - IAM instance profile with SSM, ECR, CloudWatch, and Parameter Store access
+
+The stack references the platform stack to obtain the ECR repository URL.
+"""
 
 import pulumi
 import pulumi_aws as aws
@@ -57,8 +69,9 @@ if not aws.config.region:
 # AWS region is determined by provider configuration (environment or stack config).
 aws_region = aws.config.region
 
-# Reference the platform stack to get ECR repository URI
-# Assumes the platform stack has the same name as the current stack (e.g. 'dev')
+# Reference the platform stack to get ECR repository URL.
+# Assumes the platform stack has the same stack name (e.g., 'dev').
+# The ECR URL is used in the cloud-init user data for Docker image pulls.
 platform_stack = pulumi.StackReference(
     f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}"
 )
@@ -100,6 +113,7 @@ aws.iam.RolePolicyAttachment(
     policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
 )
 
+# Attach AWS managed policy for CloudWatch agent server operations.
 aws.iam.RolePolicyAttachment(
     f"{prefix}-cloudwatch-agent-policy",
     role=ec2_role.name,
@@ -113,7 +127,7 @@ aws.iam.RolePolicyAttachment(
     policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
 )
 
-# Custom policy for SSM Parameter Store access
+# Custom policy for SSM Parameter Store access (read-only for OpenClaw config).
 aws.iam.RolePolicy(
     f"{prefix}-parameter-store-policy",
     role=ec2_role.name,
@@ -140,6 +154,7 @@ ec2_instance_profile = aws.iam.InstanceProfile(
     tags={"Name": f"{prefix}-instance-profile"},
 )
 
+# IAM role for Data Lifecycle Manager to create and manage EBS snapshots.
 dlm_assume_role_policy = aws.iam.get_policy_document(
     statements=[
         {
@@ -262,7 +277,7 @@ for az, ipv4_cidr, ipv6_cidr in zip(azs, ipv4_cidrs, ipv6_cidrs):
         route_table_id=rt.id,
     )
 
-# Security group for Ec2 instance
+# Security group for EC2 instance (no inbound rules; access via SSM only).
 ec2_sg = aws.ec2.SecurityGroup(
     f"{prefix}-sg",
     description="Security group for Spot Instance",
@@ -317,11 +332,12 @@ else:
 
 subnet_in_selected_az = {az: subnet for az, subnet in zip(azs, subnets)}[selected_az]
 
-# Create the Spot Instance Request
+# Create the Spot Instance Request with persistent type.
+# Instance will be restarted (not terminated) if interrupted.
 spot = aws.ec2.SpotInstanceRequest(
     f"{prefix}-spot",
     ami=ami.id,
-    instance_type=ec2_instance_type,  # Suitable ARM-based instance for OpenClaw Lab server
+    instance_type=ec2_instance_type,  # ARM-based instance (t4g.small default)
     iam_instance_profile=ec2_instance_profile.name,
     vpc_security_group_ids=[ec2_sg.id],
     subnet_id=subnet_in_selected_az.id,
@@ -334,7 +350,7 @@ spot = aws.ec2.SpotInstanceRequest(
             openclaw_data_device_name=data_device_name,
         )
     ),
-    # Spot instance configuration
+    # Spot instance configuration: persistent request with stop behavior.
     spot_type="persistent",  # Keeps requesting if interrupted
     instance_interruption_behavior="stop",  # Stop instead of terminate on interruption
     wait_for_fulfillment=True,  # Wait for the spot request to be fulfilled
@@ -359,6 +375,8 @@ spot = aws.ec2.SpotInstanceRequest(
     },
 )
 
+# Dedicated EBS volume for persistent OpenClaw data.
+# Tagged for DLM snapshot lifecycle management.
 data_volume = aws.ebs.Volume(
     f"{prefix}-data-volume",
     availability_zone=selected_az,
@@ -375,6 +393,8 @@ data_volume = aws.ebs.Volume(
     },
 )
 
+# Data Lifecycle Manager policy for automated EBS snapshots.
+# Snapshots are taken on schedule and pruned based on retention policy.
 aws.dlm.LifecyclePolicy(
     f"{prefix}-data-volume-snapshot-policy",
     description="OpenClaw data volume scheduled snapshots",
@@ -412,6 +432,8 @@ aws.dlm.LifecyclePolicy(
     },
 )
 
+# Attach data volume to the Spot instance.
+# delete_before_replace prevents VolumeInUse errors during replacement.
 aws.ec2.VolumeAttachment(
     f"{prefix}-data-volume-attachment",
     device_name=data_device_name,

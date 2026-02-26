@@ -22,15 +22,17 @@ ACT_INFRA_FLAGS = -s PULUMI_ACCESS_TOKEN=$(PULUMI_ACCESS_TOKEN) \
 	--var AWS_REGION=$(AWS_REGION) \
 	--input stack=$(STACK)
 
-# AUTO_APPROVE controls whether ``--yes`` is added to pulumi commands.  Set
-# it to ``true`` or ``yes`` (case-sensitive) when running in CI or any
-# non-interactive context; the default is ``false`` which leaves Pulumi in
-# preview mode so you must manually confirm changes.
+# AUTO_APPROVE controls whether `--yes` is added to Pulumi commands. Set
+# it to `true` or `yes` (case-sensitive) when running in CI or any
+# non-interactive context. The default is `false`, which requires manual
+# confirmation of changes during `pulumi up` and `pulumi destroy`.
 AUTO_APPROVE ?= false
-# treat either "true" or "yes" (case-sensitive) as approval
+# treat either "true" or "yes" (case-sensitive) as approval signal
 APPROVE_FLAGS := $(if $(filter $(AUTO_APPROVE),true yes),--yes,)
 
-# Auto-load a local .env file if present (convenience). `.env` should NOT be committed.
+# Auto-load a local .env file if present (for convenience).
+# IMPORTANT: `.env` should NEVER be committed to version control.
+# Use it for local development environment variables only.
 ifneq (,$(wildcard .env))
 # Capture variables defined before loading .env
 ENV_PRE_VARS := $(.VARIABLES)

@@ -3,7 +3,10 @@
 This stack manages long-lived platform infrastructure that the ec2-spot stack
 and CI/CD pipelines depend on:
   - GitHub Actions OIDC provider and IAM role for deploying via Pulumi
-  - Public ECR repository for the OpenClaw Docker image
+  - Private ECR repository for the OpenClaw Docker image
+
+The platform stack should be deployed BEFORE the ec2-spot stack, as it provides
+the ECR repository URL that ec2-spot references via StackReference.
 """
 
 import json
@@ -99,7 +102,7 @@ github_actions_role = aws.iam.Role(
 # Scoped to the specific services and resource patterns used by ec2-spot.
 
 # EC2 permissions: VPC, subnets, IGW, route tables, security groups, spot
-# instances, EIPs, AMI lookups, spot price lookups, AZ lookups, tags.
+# instances, EIPs, AMI lookups, spot price lookups, AZ lookups, tags, IPv6.
 ec2_policy = aws.iam.RolePolicy(
     f"{prefix}-ec2-policy",
     role=github_actions_role.name,
@@ -213,10 +216,10 @@ iam_policy = aws.iam.RolePolicy(
     ),
 )
 
-# OIDC permissions: allow listing the OIDC provider.
-# This is needed by the Pulumi GitHub OIDC provider to verify the provider exists and get its ARN.
-# Note it only applies once the role is created manually, as Github Actions
-# needs to assume the role to get these permissions, so it can't be used to create the role in the first place.
+# OIDC permissions: allow listing and reading the OIDC provider.
+# This is needed by Pulumi to verify the provider exists and get its ARN.
+# Note: This permission is only usable AFTER the role exists. The platform stack
+# must be initially deployed locally (not via GitHub Actions) to bootstrap the role.
 iam_oidc_policy = aws.iam.RolePolicy(
     f"{prefix}-iam-oidc-policy",
     role=github_actions_role.name,
@@ -346,7 +349,7 @@ ec2_volume_policy = aws.iam.RolePolicy(
     ),
 )
 
-# DLM permissions: manage machine images for the EC2 instance.
+# DLM permissions: manage Data Lifecycle Manager policies for EBS snapshots.
 dlm_policy = aws.iam.RolePolicy(
     f"{prefix}-dlm-policy",
     role=github_actions_role.name,

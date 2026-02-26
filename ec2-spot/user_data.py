@@ -1,4 +1,4 @@
-"""User-data script builder EC2 instance."""
+"""User-data cloud-init script builder for EC2 instance."""
 
 from template_helpers import load_template_source, render_template
 
@@ -32,12 +32,27 @@ def build_user_data(
     ecr_repository_url: str,
     openclaw_data_device_name: str = DEFAULT_OPENCLAW_DATA_DEVICE_NAME,
 ) -> str:
-    """Return the cloud-init script used to bootstrap the instance.
+    """Return the cloud-init script used to bootstrap the EC2 instance.
+
+    This function builds the complete cloud-init YAML configuration by:
+    1. Extracting the ECR registry domain from the repository URL
+    2. Rendering the systemd service file with AWS region and ECR credentials
+    3. Loading static templates (Docker Compose, CloudWatch config, helper scripts)
+    4. Rendering the main cloud-config.yaml.j2 template with all context
 
     Parameters
     ----------
-    aws_region: AWS region for SSM parameter store access.
-    ecr_repository_uri: URI of the ECR repository (e.g. 123.dkr.ecr.re.amazonaws.com/repo)
+    aws_region : str
+        AWS region for SSM Parameter Store access and ECR authentication.
+    ecr_repository_url : str
+        Full ECR repository URL (e.g., '123456789012.dkr.ecr.us-east-1.amazonaws.com/openclaw').
+    openclaw_data_device_name : str, optional
+        Device name for the persistent data volume (default: '/dev/sdf').
+
+    Returns
+    -------
+    str
+        Complete cloud-init YAML configuration as a string.
     """
 
     registry_domain = extract_ecr_registry_domain(ecr_repository_url)
