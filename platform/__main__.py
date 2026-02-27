@@ -208,7 +208,7 @@ iam_policy = aws.iam.RolePolicy(
                         "iam:PassRole",
                     ],
                     "Resource": [
-                        f"arn:aws:iam::{account_id}:role/openclaw-lab-*",
+                        f"arn:aws:iam::{account_id}:role/openclaw-*",
                         f"arn:aws:iam::{account_id}:instance-profile/openclaw-lab-*",
                     ],
                 },
