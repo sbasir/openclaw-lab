@@ -6,7 +6,7 @@ This stack manages ephemeral compute resources:
   - Security groups (SSM-only access, no inbound ports)
   - EC2 Spot instance with persistent request
   - Elastic IP for stable public addressing
-  - EBS data volume with DLM-managed snapshots
+  - Root EBS volume sized via stack configuration
   - IAM instance profile with SSM, ECR, CloudWatch, and Parameter Store access
 
 The stack references the platform stack to obtain the ECR repository URL.
@@ -400,8 +400,6 @@ def create_dashboard_body(instance_id: str) -> str:
     """Create minimal dashboard JSON via extracted module."""
     return create_minimal_dashboard_body(
         instance_id=instance_id,
-        # volume_id is no longer tracked separately; workspace lives on root disk
-        volume_id="",
         aws_region=aws_region,
         stack_name=pulumi.get_stack(),
     )

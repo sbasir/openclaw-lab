@@ -17,7 +17,7 @@ OpenClaw Lab is a Pulumi-based Infrastructure-as-Code project that manages OpenC
 2. **`ec2-spot/`** - Ephemeral compute (can be destroyed/recreated):
    - VPC with multi-AZ subnets (IPv4 + IPv6 via calculated CIDR blocks)
    - Security groups, IAM instance profile, Spot instance
-   - EBS data volume (backed up via S3 sync; snapshot workflow retired)
+   - Root EBS volume sized via stack configuration
    - Systemd service for OpenClaw
    - **Cross-stack reference** to platform stack for ECR URL
 
@@ -44,9 +44,9 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 
 - `template_helpers.load_template_source()`: Read raw template file (for embedding config)
 - `template_helpers.render_template(name, context)`: Render Jinja2 template with context dict
-- Context includes: ECR registry, AWS region, data device name, version pins, service config
+- Context includes: ECR registry, AWS region, version pins, service config
 - Templates in `ec2-spot/templates/` include:
-  - `cloud-config.yaml.j2`: Main cloud-init script (mounts volume, starts Docker, manages secrets)
+  - `cloud-config.yaml.j2`: Main cloud-init script (starts Docker, manages secrets)
   - `openclaw-service.conf`: Systemd service unit (templated with registry + region)
   - `docker-compose.yaml`: OpenClaw services definition
   - `cloudwatch-agent-config.json`: CloudWatch agent configuration
@@ -54,17 +54,16 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 ### 3. Secret & Data Lifecycle
 
 - **Secrets**: Stored in **AWS SSM Parameter Store**, fetched at service start into `/run/openclaw/.env`
-- **Data**: Persisted on dedicated EBS volume at `/opt/openclaw` (includes `.openclaw/` state)
-- **Snapshots**: (legacy) previously DLM-managed daily snapshots
-  **now** replaced by S3 sync; data restores use the S3 bucket instead
+- **Data**: Persisted on the root EBS volume at `/opt/openclaw` (includes `.openclaw/` state)
+- **Backups**: S3 sync; data restores use the S3 bucket
 
 ### 4. CloudWatch Observability Dashboard
 
 - **Automatic creation**: Dashboard created for each stack deployment
-- **Comprehensive metrics**: CPU, memory, disk, network, EBS, SSM, and logs
+- **Comprehensive metrics**: CPU, memory, disk, network, SSM, and logs
 - **Custom namespace**: CloudWatch agent publishes to `OpenClawLab/EC2`
 - **Access**: Via `dashboard_url` stack output or AWS Console
-- **Widgets**: Modular widget builders in `dashboard_builder.py` (CPU, memory, disk, network, EBS, SSM, logs)
+- **Widgets**: Modular widget builders in `dashboard_builder.py` (CPU, memory, disk, network, SSM, logs)
 - **Log insights**: Integration with CloudWatch Logs for error/warning detection
 
 ## Development Workflows
@@ -122,13 +121,11 @@ Configuration is managed via `pulumi config set` (stored in `Pulumi.dev.yaml` or
 - `create_oidc_provider` (optional): Set to `true` only on first setup (OIDC provider is account-scoped)
 
 **EC2 Spot stack** (`ec2-spot/`):
-- `availability_zone` (required): AZ for instance + data volume
+- `availability_zone` (required): AZ for instance
 - `instance_type` (optional): Default `t4g.small`
 - `cidr_block` (optional): VPC CIDR, default `10.0.0.0/16`
 - `ami` (optional): Override default Amazon Linux 2023 AMI
 - `root_volume_size_gib` (optional): Default `15` (controls size of the root EBS volume)
-<!-- snapshot configuration options retired; backups now use S3 bucket -->
-<!-- keep here for historical reference but they are ignored by the stack -->
 
 ## Code Conventions & Patterns
 
@@ -165,7 +162,7 @@ When adding subnet allocation logic:
 
 ```
 ec2-spot/
-  __main__.py                    # Pulumi stack definition (VPC, EC2, EBS, IAM)
+  __main__.py                    # Pulumi stack definition (VPC, EC2, IAM)
   network_helpers.py             # Pure Python CIDR/subnet calculations
   user_data.py                   # Cloud-init script builder
   template_helpers.py            # Jinja2 template loading/rendering

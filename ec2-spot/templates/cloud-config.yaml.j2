@@ -59,8 +59,8 @@ write_files:
       AWS_REGION="{{ aws_region }}"
       LOG_FILE="/var/log/openclaw-s3-backup.log"
 
-      if ! mountpoint -q "$OPENCLAW_HOME"; then
-        echo "$(date -Iseconds) ERROR: $OPENCLAW_HOME is not mounted" >> "$LOG_FILE" 2>&1
+      if [ ! -d "$OPENCLAW_HOME/.openclaw" ]; then
+        echo "$(date -Iseconds) ERROR: $OPENCLAW_HOME/.openclaw does not exist" >> "$LOG_FILE" 2>&1
         exit 1
       fi
 
