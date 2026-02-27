@@ -95,10 +95,10 @@ write_files:
       AWS_REGION="{{ aws_region }}"
       LOG_FILE="/var/log/openclaw-s3-restore.log"
 
-      mkdir -p "$OPENCLAW_HOME"
+      mkdir -p "$OPENCLAW_HOME/.openclaw"
       {
         echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
-        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/" --region "$AWS_REGION" --exclude ".env" --exclude ".env/*"
+        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION"
         echo "$(date -Iseconds) Restore complete"
       } >> "$LOG_FILE" 2>&1
 
@@ -121,7 +121,7 @@ write_files:
 
       {
         echo "$(date -Iseconds) Starting backup to s3://$BACKUP_BUCKET"
-        aws s3 sync "$OPENCLAW_HOME/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION" --exclude ".env" --exclude ".env/*"
+        aws s3 sync "$OPENCLAW_HOME/.openclaw/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION"
         echo "$(date -Iseconds) Backup complete"
       } >> "$LOG_FILE" 2>&1
 
@@ -138,8 +138,7 @@ write_files:
 
       [Service]
       Type=oneshot
-      User=ec2-user
-      Group=ec2-user
+      User=root
       ExecStart=/usr/local/bin/openclaw-s3-restore.sh
       SyslogIdentifier=openclaw-s3-restore
 
@@ -158,8 +157,7 @@ write_files:
 
       [Service]
       Type=oneshot
-      User=ec2-user
-      Group=ec2-user
+      User=root
       ExecStart=/usr/local/bin/openclaw-s3-backup.sh
       SyslogIdentifier=openclaw-s3-backup
 
