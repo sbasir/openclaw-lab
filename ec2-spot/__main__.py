@@ -80,6 +80,7 @@ platform_stack = pulumi.StackReference(
 )
 ecr_repository_url = platform_stack.require_output("ecr_repository_url")
 s3_backup_bucket_name = platform_stack.require_output("s3_backup_bucket_name")
+s3_scripts_bucket_name = platform_stack.require_output("s3_scripts_bucket_name")
 
 
 # -----------------------------------------------------------------------------
@@ -173,6 +174,30 @@ aws.iam.RolePolicy(
                         ],
                         "Resource": [
                             f"arn:aws:s3:::{bucket}",
+                            f"arn:aws:s3:::{bucket}/*",
+                        ],
+                    }
+                ],
+            }
+        )
+    ),
+)
+
+aws.iam.RolePolicy(
+    f"{prefix}-s3-scripts-policy",
+    role=ec2_role.name,
+    policy=s3_scripts_bucket_name.apply(
+        lambda bucket: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "OpenClawS3Scripts",
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:GetObject",
+                        ],
+                        "Resource": [
                             f"arn:aws:s3:::{bucket}/*",
                         ],
                     }
@@ -378,12 +403,15 @@ spot = aws.ec2.SpotInstanceRequest(
     subnet_id=subnet_in_selected_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
-    user_data=pulumi.Output.all(ecr_repository_url, s3_backup_bucket_name).apply(
+    user_data=pulumi.Output.all(
+        ecr_repository_url, s3_backup_bucket_name, s3_scripts_bucket_name
+    ).apply(
         lambda args: build_user_data(
             aws_region=aws_region,
             ecr_repository_url=args[0],
             openclaw_data_device_name=data_device_name,
             s3_backup_bucket_name=args[1],
+            s3_scripts_bucket_name=args[2],
         )
     ),
     # Spot instance configuration: persistent request with stop behavior.

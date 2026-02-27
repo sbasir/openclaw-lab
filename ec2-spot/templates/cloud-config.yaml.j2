@@ -64,32 +64,12 @@ bootcmd:
     mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
 
 write_files:
-  - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
-    owner: root:root
-    permissions: '0644'
-    content: |
-      {{ cloudwatch_agent_config | indent(width=6) }}
-
-  - path: /opt/openclaw/docker-compose.yaml
-    owner: ec2-user:ec2-user
-    permissions: '0644'
-    defer: true
-    content: |
-      {{ docker_compose_config | indent(width=6) }}
-
   - path: /etc/systemd/system/openclaw.service
     owner: root:root
     permissions: '0644'
     defer: true
     content: |
       {{ openclaw_service | indent(width=6) }}
-
-  - path: /opt/openclaw/auto-approve-devices.sh
-    owner: ec2-user:ec2-user
-    permissions: '0755'
-    defer: true
-    content: |
-      {{ auto_approve_devices_script | indent(width=6) }}
 
   - path: /var/log/openclaw-s3-restore.log
     owner: ec2-user:ec2-user
@@ -141,7 +121,7 @@ write_files:
 
       {
         echo "$(date -Iseconds) Starting backup to s3://$BACKUP_BUCKET"
-        aws s3 sync "$OPENCLAW_HOME/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION" --delete --exclude ".env" --exclude ".env/*"
+        aws s3 sync "$OPENCLAW_HOME/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION" --exclude ".env" --exclude ".env/*"
         echo "$(date -Iseconds) Backup complete"
       } >> "$LOG_FILE" 2>&1
 
@@ -173,7 +153,7 @@ write_files:
     content: |
       [Unit]
       Description=OpenClaw backup to S3
-      After=network-online.target
+      After=network-online.target openclaw-s3-restore.service
       Wants=network-online.target
 
       [Service]
@@ -276,21 +256,31 @@ runcmd:
 
   - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
+  # Download bootstrap scripts from S3 (keeps cloud-config under 16KB limit)
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" /opt/openclaw/auto-approve-devices.sh
+    chmod 755 /opt/openclaw/auto-approve-devices.sh
+    chown ec2-user:ec2-user /opt/openclaw/auto-approve-devices.sh
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" /opt/aws/amazon-cloudwatch-agent/etc/config.json
+    chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/config.json
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" /opt/openclaw/docker-compose.yaml
+    chmod 644 /opt/openclaw/docker-compose.yaml
+    chown ec2-user:ec2-user /opt/openclaw/docker-compose.yaml
+
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
   - systemctl enable docker.service
   - systemctl start docker.service
 
   - systemctl daemon-reload
-  - systemctl enable openclaw.service
-  - systemctl start openclaw.service
-  - sleep 5
-  - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
-
-  - systemctl enable openclaw-auto-approve.service
-  - systemctl enable openclaw-auto-approve.timer
-  - systemctl start openclaw-auto-approve.timer
   - systemctl enable openclaw-s3-backup.timer
   - systemctl start openclaw-s3-backup.timer
-  - systemctl enable openclaw-s3-restore.service
-  - systemctl start openclaw-s3-restore.service
+  - systemctl enable openclaw.service
+  - systemctl start openclaw.service
+
+  - systemctl enable openclaw-auto-approve.timer
+  - systemctl start openclaw-auto-approve.timer

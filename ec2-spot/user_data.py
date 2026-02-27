@@ -1,6 +1,6 @@
 """User-data cloud-init script builder for EC2 instance."""
 
-from template_helpers import load_template_source, render_template
+from template_helpers import render_template
 
 DEFAULT_COMPOSE_VERSION = "v5.0.2"
 DEFAULT_OPENCLAW_DATA_DEVICE_NAME = "/dev/sdf"
@@ -32,6 +32,7 @@ def build_user_data(
     ecr_repository_url: str,
     openclaw_data_device_name: str = DEFAULT_OPENCLAW_DATA_DEVICE_NAME,
     s3_backup_bucket_name: str | None = None,
+    s3_scripts_bucket_name: str | None = None,
 ) -> str:
     """Return the cloud-init script used to bootstrap the EC2 instance.
 
@@ -51,6 +52,8 @@ def build_user_data(
         Device name for the persistent data volume (default: '/dev/sdf').
     s3_backup_bucket_name : str
         S3 bucket name for OpenClaw backup/restore sync.
+    s3_scripts_bucket_name : str
+        S3 bucket name containing bootstrap scripts (to keep cloud-init under 16KB).
 
     Returns
     -------
@@ -68,15 +71,16 @@ def build_user_data(
     if not s3_backup_bucket_name:
         raise ValueError("s3_backup_bucket_name is required for backup/restore")
 
+    if not s3_scripts_bucket_name:
+        raise ValueError("s3_scripts_bucket_name is required for bootstrap scripts")
+
     context = {
         "compose_version": DEFAULT_COMPOSE_VERSION,
-        "cloudwatch_agent_config": load_template_source("cloudwatch-agent-config.json"),
-        "docker_compose_config": load_template_source("docker-compose.yaml"),
-        "auto_approve_devices_script": load_template_source("auto-approve-devices.sh"),
         "openclaw_service": render_template("openclaw-service.conf", service_context),
         "aws_region": aws_region,
         "ecr_registry_domain": registry_domain,
         "openclaw_data_device_name": openclaw_data_device_name,
         "s3_backup_bucket_name": s3_backup_bucket_name,
+        "s3_scripts_bucket_name": s3_scripts_bucket_name,
     }
     return render_template("cloud-config.yaml.j2", context)

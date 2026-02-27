@@ -17,10 +17,11 @@ def test_build_user_data_renders_cloud_config(aws_region: str) -> None:
         aws_region=aws_region,
         ecr_repository_url=ecr_uri,
         s3_backup_bucket_name="openclaw-backup-test",
+        s3_scripts_bucket_name="openclaw-scripts-test",
     )
 
     assert user_data.startswith("#cloud-config")
-    assert "/opt/openclaw/docker-compose.yaml" in user_data
+    assert "s3://openclaw-scripts-test/docker-compose.yaml" in user_data
     assert "/etc/systemd/system/openclaw.service" in user_data
     assert "/run/openclaw/.env" in user_data
     assert "systemctl enable openclaw.service" in user_data
@@ -41,6 +42,7 @@ def test_build_user_data_includes_ssm_parameter_and_region(aws_region: str) -> N
         aws_region=aws_region,
         ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
         s3_backup_bucket_name="openclaw-backup-test",
+        s3_scripts_bucket_name="openclaw-scripts-test",
     )
 
     assert "--name '/openclaw-lab/dotenv'" in user_data
@@ -54,6 +56,7 @@ def test_build_user_data_includes_compose_version() -> None:
         aws_region="us-east-1",
         ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
         s3_backup_bucket_name="openclaw-backup-test",
+        s3_scripts_bucket_name="openclaw-scripts-test",
     )
     assert (
         f"/releases/download/{DEFAULT_COMPOSE_VERSION}/docker-compose-linux-"
@@ -67,6 +70,7 @@ def test_build_user_data_under_16kb_limit() -> None:
         aws_region="us-east-1",
         ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
         s3_backup_bucket_name="openclaw-backup-test",
+        s3_scripts_bucket_name="openclaw-scripts-test",
     )
 
     assert len(user_data) < 16384, (
@@ -88,12 +92,22 @@ def test_build_user_data_requires_backup_bucket() -> None:
         )
 
 
+def test_build_user_data_requires_scripts_bucket() -> None:
+    with pytest.raises(ValueError, match="s3_scripts_bucket_name"):
+        build_user_data(
+            aws_region="us-east-1",
+            ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
+            s3_backup_bucket_name="openclaw-backup-test",
+        )
+
+
 def test_build_user_data_includes_data_device_name() -> None:
     user_data = build_user_data(
         aws_region="us-east-1",
         ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
         openclaw_data_device_name="/dev/sdg",
         s3_backup_bucket_name="openclaw-backup-test",
+        s3_scripts_bucket_name="openclaw-scripts-test",
     )
 
     assert 'OPENCLAW_DATA_DEVICE="/dev/sdg"' in user_data

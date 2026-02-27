@@ -10,6 +10,7 @@ the ECR repository URL that ec2-spot references via StackReference.
 """
 
 import json
+from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
@@ -308,10 +309,15 @@ s3_platform_policy = aws.iam.RolePolicy(
                         "s3:PutBucketPublicAccessBlock",
                         "s3:PutBucketVersioning",
                         "s3:GetBucketVersioning",
+                        "s3:PutObject",
+                        "s3:GetObject",
+                        "s3:DeleteObject",
                     ],
                     "Resource": [
                         "arn:aws:s3:::openclaw-lab-backup-*",
                         "arn:aws:s3:::openclaw-lab-backup-*/*",
+                        "arn:aws:s3:::openclaw-lab-scripts-*",
+                        "arn:aws:s3:::openclaw-lab-scripts-*/*",
                     ],
                 }
             ],
@@ -476,6 +482,77 @@ aws.s3.BucketPublicAccessBlock(
     restrict_public_buckets=True,
 )
 
+# =============================================================================
+# S3 Scripts Bucket (to keep cloud-init under 16KB limit)
+# =============================================================================
+
+scripts_bucket_name = f"openclaw-lab-scripts-{pulumi.get_stack()}-{account_id}".lower()
+
+scripts_bucket = aws.s3.Bucket(
+    f"{prefix}-scripts-bucket",
+    bucket=scripts_bucket_name,
+    force_destroy=True,
+    versioning=aws.s3.BucketVersioningArgs(
+        enabled=True,
+    ),
+    tags={"Name": f"{prefix}-scripts-bucket"},
+)
+
+aws.s3.BucketServerSideEncryptionConfiguration(
+    f"{prefix}-scripts-bucket-sse",
+    bucket=scripts_bucket.id,
+    rules=[
+        aws.s3.BucketServerSideEncryptionConfigurationRuleArgs(
+            apply_server_side_encryption_by_default=aws.s3.BucketServerSideEncryptionConfigurationRuleApplyServerSideEncryptionByDefaultArgs(
+                sse_algorithm="AES256",
+            ),
+        )
+    ],
+)
+
+aws.s3.BucketPublicAccessBlock(
+    f"{prefix}-scripts-bucket-public-access",
+    bucket=scripts_bucket.id,
+    block_public_acls=True,
+    block_public_policy=True,
+    ignore_public_acls=True,
+    restrict_public_buckets=True,
+)
+
+# Upload bootstrap scripts to keep cloud-init under 16KB limit
+# Scripts are sourced from ec2-spot/templates directory
+
+
+def load_ec2_spot_template(filename: str) -> str:
+    """Load a template file from the ec2-spot/templates directory."""
+    template_path = Path(__file__).parent / ".." / "ec2-spot" / "templates" / filename
+    return template_path.read_text(encoding="utf-8")
+
+
+aws.s3.BucketObject(
+    f"{prefix}-auto-approve-devices-script",
+    bucket=scripts_bucket.id,
+    key="auto-approve-devices.sh",
+    content=load_ec2_spot_template("auto-approve-devices.sh"),
+    content_type="text/x-sh",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-cloudwatch-agent-config",
+    bucket=scripts_bucket.id,
+    key="cloudwatch-agent-config.json",
+    content=load_ec2_spot_template("cloudwatch-agent-config.json"),
+    content_type="application/json",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-docker-compose-config",
+    bucket=scripts_bucket.id,
+    key="docker-compose.yaml",
+    content=load_ec2_spot_template("docker-compose.yaml"),
+    content_type="text/x-yaml",
+)
+
 # ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------
@@ -485,3 +562,5 @@ pulumi.export("oidc_provider_arn", oidc_provider_arn)
 pulumi.export("ecr_repository_url", ecr_repo.repository_url)
 pulumi.export("s3_backup_bucket_name", s3_backup_bucket.bucket)
 pulumi.export("s3_backup_bucket_arn", s3_backup_bucket.arn)
+pulumi.export("s3_scripts_bucket_name", scripts_bucket.bucket)
+pulumi.export("s3_scripts_bucket_arn", scripts_bucket.arn)
