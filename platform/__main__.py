@@ -10,6 +10,7 @@ the ECR repository URL that ec2-spot references via StackReference.
 """
 
 import json
+from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
@@ -207,7 +208,7 @@ iam_policy = aws.iam.RolePolicy(
                         "iam:PassRole",
                     ],
                     "Resource": [
-                        f"arn:aws:iam::{account_id}:role/openclaw-lab-*",
+                        f"arn:aws:iam::{account_id}:role/openclaw-*",
                         f"arn:aws:iam::{account_id}:instance-profile/openclaw-lab-*",
                     ],
                 },
@@ -284,6 +285,46 @@ ssm_policy = aws.iam.RolePolicy(
     ),
 )
 
+# S3 permissions: manage the OpenClaw backup bucket created in this stack.
+s3_platform_policy = aws.iam.RolePolicy(
+    f"{prefix}-s3-platform-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "S3BackupBucketManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "s3:CreateBucket",
+                        "s3:DeleteBucket",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                        "s3:GetBucketTagging",
+                        "s3:PutBucketTagging",
+                        "s3:GetBucketEncryption",
+                        "s3:PutBucketEncryption",
+                        "s3:GetBucketPublicAccessBlock",
+                        "s3:PutBucketPublicAccessBlock",
+                        "s3:PutBucketVersioning",
+                        "s3:GetBucketVersioning",
+                        "s3:PutObject",
+                        "s3:GetObject",
+                        "s3:DeleteObject",
+                    ],
+                    "Resource": [
+                        "arn:aws:s3:::openclaw-lab-backup-*",
+                        "arn:aws:s3:::openclaw-lab-backup-*/*",
+                        "arn:aws:s3:::openclaw-lab-scripts-*",
+                        "arn:aws:s3:::openclaw-lab-scripts-*/*",
+                    ],
+                }
+            ],
+        }
+    ),
+)
+
 # STS permissions: Pulumi uses get-caller-identity to determine the account.
 sts_policy = aws.iam.RolePolicy(
     f"{prefix}-sts-policy",
@@ -308,72 +349,6 @@ ecr_policy_attachment = aws.iam.RolePolicyAttachment(
     f"{prefix}-ecr-policy",
     role=github_actions_role.name,
     policy_arn="arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser",
-)
-
-# EC2 Volume permissions: manage EBS volumes for persistent storage.
-ec2_volume_policy = aws.iam.RolePolicy(
-    f"{prefix}-ec2-volume-policy",
-    role=github_actions_role.name,
-    policy=json.dumps(
-        {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Sid": "EC2VolumeManagement",
-                    "Effect": "Allow",
-                    "Action": [
-                        "ec2:CreateVolume",
-                        "ec2:DeleteVolume",
-                        "ec2:AttachVolume",
-                        "ec2:DetachVolume",
-                        "ec2:DescribeVolumes",
-                    ],
-                    "Resource": [
-                        f"arn:aws:ec2:{aws_region}:{account_id}:volume/*",
-                        f"arn:aws:ec2:{aws_region}:{account_id}:instance/*",
-                    ],
-                },
-                {
-                    "Sid": "EC2SnapshotManagement",
-                    "Effect": "Allow",
-                    "Action": [
-                        "ec2:CreateSnapshot",
-                        "ec2:DeleteSnapshot",
-                        "ec2:DescribeSnapshots",
-                        "ec2:CreateTags",
-                    ],
-                    "Resource": "*",
-                },
-            ],
-        }
-    ),
-)
-
-# DLM permissions: manage Data Lifecycle Manager policies for EBS snapshots.
-dlm_policy = aws.iam.RolePolicy(
-    f"{prefix}-dlm-policy",
-    role=github_actions_role.name,
-    policy=json.dumps(
-        {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Sid": "DLMImageManagement",
-                    "Effect": "Allow",
-                    "Action": [
-                        "dlm:GetLifecyclePolicies",
-                        "dlm:CreateLifecyclePolicy",
-                        "dlm:DeleteLifecyclePolicy",
-                        "dlm:GetLifecyclePolicy",
-                        "dlm:UpdateLifecyclePolicy",
-                        "dlm:ListTagsForResource",
-                        "dlm:TagResource",
-                    ],
-                    "Resource": f"arn:aws:dlm:{aws_region}:{account_id}:policy/*",
-                },
-            ],
-        }
-    ),
 )
 
 # CloudWatch permissions: manage CloudWatch Dashboards for observability.
@@ -412,6 +387,106 @@ ecr_repo = aws.ecr.Repository(
     tags={"Name": f"{prefix}-ecr"},
 )
 
+# =============================================================================
+# S3 Backup Bucket
+# =============================================================================
+
+s3_backup_bucket_name = f"openclaw-lab-backup-{pulumi.get_stack()}-{account_id}".lower()
+
+s3_backup_bucket = aws.s3.Bucket(
+    f"{prefix}-backup-bucket",
+    bucket=s3_backup_bucket_name,
+    force_destroy=False,
+    server_side_encryption_configuration={
+        "rule": {
+            "apply_server_side_encryption_by_default": {
+                "sse_algorithm": "AES256",
+            },
+        },
+    },
+    tags={"Name": f"{prefix}-backup-bucket"},
+)
+
+aws.s3.BucketPublicAccessBlock(
+    f"{prefix}-backup-bucket-public-access",
+    bucket=s3_backup_bucket.id,
+    block_public_acls=True,
+    block_public_policy=True,
+    ignore_public_acls=True,
+    restrict_public_buckets=True,
+)
+
+# =============================================================================
+# S3 Scripts Bucket (to keep cloud-init under 16KB limit)
+# =============================================================================
+
+scripts_bucket_name = f"openclaw-lab-scripts-{pulumi.get_stack()}-{account_id}".lower()
+
+scripts_bucket = aws.s3.Bucket(
+    f"{prefix}-scripts-bucket",
+    bucket=scripts_bucket_name,
+    force_destroy=True,
+    versioning=aws.s3.BucketVersioningArgs(
+        enabled=True,
+    ),
+    tags={"Name": f"{prefix}-scripts-bucket"},
+)
+
+aws.s3.BucketServerSideEncryptionConfiguration(
+    f"{prefix}-scripts-bucket-sse",
+    bucket=scripts_bucket.id,
+    rules=[
+        aws.s3.BucketServerSideEncryptionConfigurationRuleArgs(
+            apply_server_side_encryption_by_default=aws.s3.BucketServerSideEncryptionConfigurationRuleApplyServerSideEncryptionByDefaultArgs(
+                sse_algorithm="AES256",
+            ),
+        )
+    ],
+)
+
+aws.s3.BucketPublicAccessBlock(
+    f"{prefix}-scripts-bucket-public-access",
+    bucket=scripts_bucket.id,
+    block_public_acls=True,
+    block_public_policy=True,
+    ignore_public_acls=True,
+    restrict_public_buckets=True,
+)
+
+# Upload bootstrap scripts to keep cloud-init under 16KB limit
+# Scripts are sourced from ec2-spot/templates directory
+
+
+def load_ec2_spot_template(filename: str) -> str:
+    """Load a template file from the ec2-spot/templates directory."""
+    template_path = Path(__file__).parent / ".." / "ec2-spot" / "templates" / filename
+    return template_path.read_text(encoding="utf-8")
+
+
+aws.s3.BucketObject(
+    f"{prefix}-auto-approve-devices-script",
+    bucket=scripts_bucket.id,
+    key="auto-approve-devices.sh",
+    content=load_ec2_spot_template("auto-approve-devices.sh"),
+    content_type="text/x-sh",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-cloudwatch-agent-config",
+    bucket=scripts_bucket.id,
+    key="cloudwatch-agent-config.json",
+    content=load_ec2_spot_template("cloudwatch-agent-config.json"),
+    content_type="application/json",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-docker-compose-config",
+    bucket=scripts_bucket.id,
+    key="docker-compose.yaml",
+    content=load_ec2_spot_template("docker-compose.yaml"),
+    content_type="text/x-yaml",
+)
+
 # ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------
@@ -419,3 +494,7 @@ ecr_repo = aws.ecr.Repository(
 pulumi.export("github_actions_role_arn", github_actions_role.arn)
 pulumi.export("oidc_provider_arn", oidc_provider_arn)
 pulumi.export("ecr_repository_url", ecr_repo.repository_url)
+pulumi.export("s3_backup_bucket_name", s3_backup_bucket.bucket)
+pulumi.export("s3_backup_bucket_arn", s3_backup_bucket.arn)
+pulumi.export("s3_scripts_bucket_name", scripts_bucket.bucket)
+pulumi.export("s3_scripts_bucket_arn", scripts_bucket.arn)

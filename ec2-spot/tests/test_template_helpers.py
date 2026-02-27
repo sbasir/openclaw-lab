@@ -10,24 +10,19 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
     """Render cloud-config template and verify key substitutions are present."""
     context = {
         "compose_version": "v9.9.9",
-        "cloudwatch_agent_config": '{"agent":{"metrics_collection_interval":60}}',
-        "docker_compose_config": "services:\n  app:\n    image: demo/app:latest",
-        "auto_approve_devices_script": "#!/bin/bash\necho 'test script'",
         "openclaw_service": "[Unit]\nDescription=Demo Service",
         "aws_region": "ap-southeast-2",
         "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
-        "openclaw_data_device_name": "/dev/sdf",
+        "s3_backup_bucket_name": "openclaw-backup-test",
+        "s3_scripts_bucket_name": "openclaw-scripts-test",
     }
 
     rendered = render_template("cloud-config.yaml.j2", context)
 
     assert rendered.startswith("#cloud-config")
     assert "compose/releases/download/v9.9.9/docker-compose-linux-" in rendered
-    assert 'OPENCLAW_DATA_DEVICE="/dev/sdf"' in rendered
-    assert "metrics_collection_interval" in rendered
-    assert "image: demo/app:latest" in rendered
+    assert "s3://openclaw-scripts-test/" in rendered
     assert "Description=Demo Service" in rendered
-    assert "echo 'test script'" in rendered
 
 
 def test_render_template_raises_for_missing_required_context_variable() -> None:

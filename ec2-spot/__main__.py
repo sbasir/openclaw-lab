@@ -6,11 +6,13 @@ This stack manages ephemeral compute resources:
   - Security groups (SSM-only access, no inbound ports)
   - EC2 Spot instance with persistent request
   - Elastic IP for stable public addressing
-  - EBS data volume with DLM-managed snapshots
+  - Root EBS volume sized via stack configuration
   - IAM instance profile with SSM, ECR, CloudWatch, and Parameter Store access
 
 The stack references the platform stack to obtain the ECR repository URL.
 """
+
+import json
 
 import pulumi
 import pulumi_aws as aws
@@ -33,36 +35,10 @@ ami_override = config.get("ami")
 ec2_instance_type = config.get("instance_type") or "t4g.small"  # 2 VCPUs, 2 GB RAM
 # set via: pulumi config set cidr_block 10.0.0.0/16 --stack dev
 cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
-# set via: pulumi config set data_volume_size_gib 20 --stack dev
-data_volume_size_gib = int(config.get("data_volume_size_gib") or "20")
-# set via: pulumi config set data_device_name /dev/sdf --stack dev
-data_device_name = config.get("data_device_name") or "/dev/sdf"
-# set via: pulumi config set data_volume_snapshot_id snap-0123456789abcdef0 --stack dev
-data_volume_snapshot_id = config.get("data_volume_snapshot_id")
+# set via: pulumi config set root_volume_size_gib 15 --stack dev
+root_volume_size_gib = int(config.get("root_volume_size_gib") or "15")
 # set via: pulumi config set availability_zone me-central-1a --stack dev
 availability_zone = config.require("availability_zone")
-# set via: pulumi config set snapshot_schedule_interval_hours 24 --stack dev
-snapshot_schedule_interval_hours = int(
-    config.get("snapshot_schedule_interval_hours") or "24"
-)
-# set via: pulumi config set snapshot_schedule_time 03:00 --stack dev
-snapshot_schedule_time = config.get("snapshot_schedule_time")
-# set via: pulumi config set snapshot_retention_days 30 --stack dev
-snapshot_retention_days = int(config.get("snapshot_retention_days") or "30")
-
-if snapshot_retention_days < 1:
-    raise ValueError("snapshot_retention_days must be >= 1")
-
-if snapshot_schedule_interval_hours < 1:
-    raise ValueError("snapshot_schedule_interval_hours must be >= 1")
-
-if not snapshot_schedule_time and snapshot_schedule_interval_hours == 24:
-    snapshot_schedule_time = "03:00"
-
-if snapshot_schedule_time and snapshot_schedule_interval_hours != 24:
-    raise ValueError(
-        "snapshot_schedule_time can only be set when snapshot_schedule_interval_hours is 24"
-    )
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
@@ -77,6 +53,8 @@ platform_stack = pulumi.StackReference(
     f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}"
 )
 ecr_repository_url = platform_stack.require_output("ecr_repository_url")
+s3_backup_bucket_name = platform_stack.require_output("s3_backup_bucket_name")
+s3_scripts_bucket_name = platform_stack.require_output("s3_scripts_bucket_name")
 
 
 # -----------------------------------------------------------------------------
@@ -148,42 +126,67 @@ aws.iam.RolePolicy(
     ).json,
 )
 
+aws.iam.RolePolicy(
+    f"{prefix}-s3-backup-policy",
+    role=ec2_role.name,
+    policy=s3_backup_bucket_name.apply(
+        lambda bucket: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "OpenClawS3Backup",
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:ListBucket",
+                            "s3:GetObject",
+                            "s3:PutObject",
+                            "s3:DeleteObject",
+                            "s3:AbortMultipartUpload",
+                            "s3:ListBucketMultipartUploads",
+                            "s3:ListMultipartUploadParts",
+                        ],
+                        "Resource": [
+                            f"arn:aws:s3:::{bucket}",
+                            f"arn:aws:s3:::{bucket}/*",
+                        ],
+                    }
+                ],
+            }
+        )
+    ),
+)
+
+aws.iam.RolePolicy(
+    f"{prefix}-s3-scripts-policy",
+    role=ec2_role.name,
+    policy=s3_scripts_bucket_name.apply(
+        lambda bucket: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "OpenClawS3Scripts",
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:GetObject",
+                        ],
+                        "Resource": [
+                            f"arn:aws:s3:::{bucket}/*",
+                        ],
+                    }
+                ],
+            }
+        )
+    ),
+)
+
 # Instance Profile to attach the role to EC2
 ec2_instance_profile = aws.iam.InstanceProfile(
     f"{prefix}-instance-profile",
     role=ec2_role.name,
     tags={"Name": f"{prefix}-instance-profile"},
 )
-
-# IAM role for Data Lifecycle Manager to create and manage EBS snapshots.
-dlm_assume_role_policy = aws.iam.get_policy_document(
-    statements=[
-        {
-            "actions": ["sts:AssumeRole"],
-            "principals": [
-                {
-                    "type": "Service",
-                    "identifiers": ["dlm.amazonaws.com"],
-                }
-            ],
-        }
-    ]
-)
-
-dlm_role = aws.iam.Role(
-    f"{prefix}-dlm-role",
-    name=f"{prefix}-dlm-role",
-    assume_role_policy=dlm_assume_role_policy.json,
-    description="IAM role for AWS Data Lifecycle Manager snapshots",
-    tags={"Name": f"{prefix}-dlm-role"},
-)
-
-aws.iam.RolePolicyAttachment(
-    f"{prefix}-dlm-role-policy",
-    role=dlm_role.name,
-    policy_arn="arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole",
-)
-
 
 # -----------------------------------------------------------------------------
 # Networking: VPC, Subnets, Internet Gateway, Route Table, Security Group
@@ -245,23 +248,6 @@ if availability_zone not in azs:
 
 selected_az = availability_zone
 
-if data_volume_snapshot_id:
-    snapshot = aws.ebs.get_snapshot(snapshot_ids=[data_volume_snapshot_id])
-    snapshot_expected_az = snapshot.tags.get("OpenClawAz") if snapshot.tags else None
-
-    if snapshot_expected_az and selected_az != snapshot_expected_az:
-        raise ValueError(
-            "Configured availability_zone does not match snapshot OpenClawAz tag: "
-            f"availability_zone='{selected_az}', snapshot OpenClawAz='{snapshot_expected_az}'."
-        )
-
-    if not snapshot_expected_az:
-        raise ValueError(
-            "Snapshot is missing required OpenClawAz tag; cannot validate AZ guardrail. "
-            "Any snapshot used (whether created by this stack's DLM policy or manually) "
-            "must be tagged with OpenClawAz matching the original data volume "
-            "availability_zone."
-        )
 
 pulumi.export("selected_az", selected_az)
 
@@ -344,11 +330,14 @@ spot = aws.ec2.SpotInstanceRequest(
     subnet_id=subnet_in_selected_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
-    user_data=ecr_repository_url.apply(
-        lambda url: build_user_data(
+    user_data=pulumi.Output.all(
+        ecr_repository_url, s3_backup_bucket_name, s3_scripts_bucket_name
+    ).apply(
+        lambda args: build_user_data(
             aws_region=aws_region,
-            ecr_repository_url=url,
-            openclaw_data_device_name=data_device_name,
+            ecr_repository_url=args[0],
+            s3_backup_bucket_name=args[1],
+            s3_scripts_bucket_name=args[2],
         )
     ),
     # Spot instance configuration: persistent request with stop behavior.
@@ -366,7 +355,7 @@ spot = aws.ec2.SpotInstanceRequest(
     # Root volume configuration
     root_block_device={
         "volume_type": "gp3",
-        "volume_size": 8,
+        "volume_size": root_volume_size_gib,
         "delete_on_termination": True,
         "encrypted": True,
     },
@@ -376,76 +365,6 @@ spot = aws.ec2.SpotInstanceRequest(
     },
 )
 
-# Dedicated EBS volume for persistent OpenClaw data.
-# Tagged for DLM snapshot lifecycle management.
-data_volume = aws.ebs.Volume(
-    f"{prefix}-data-volume",
-    availability_zone=selected_az,
-    size=data_volume_size_gib,
-    type="gp3",
-    encrypted=True,
-    snapshot_id=data_volume_snapshot_id,
-    tags={
-        "Name": f"{prefix}-data-volume",
-        "Purpose": "OpenClaw Persistent Data",
-        "OpenClawData": "true",
-        "OpenClawStack": pulumi.get_stack(),
-        "OpenClawAz": selected_az,
-    },
-)
-
-# Data Lifecycle Manager policy for automated EBS snapshots.
-# Snapshots are taken on schedule and pruned based on retention policy.
-aws.dlm.LifecyclePolicy(
-    f"{prefix}-data-volume-snapshot-policy",
-    description="OpenClaw data volume scheduled snapshots",
-    execution_role_arn=dlm_role.arn,
-    state="ENABLED",
-    policy_details=aws.dlm.LifecyclePolicyPolicyDetailsArgs(
-        resource_types=["VOLUME"],
-        target_tags={
-            "OpenClawData": "true",
-            "OpenClawStack": pulumi.get_stack(),
-        },
-        schedules=[
-            aws.dlm.LifecyclePolicyPolicyDetailsScheduleArgs(
-                name="openclaw-data-snapshot",
-                copy_tags=True,
-                create_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleCreateRuleArgs(
-                    interval=snapshot_schedule_interval_hours,
-                    interval_unit="HOURS",
-                    times=snapshot_schedule_time,
-                ),
-                retain_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleRetainRuleArgs(
-                    interval=snapshot_retention_days,
-                    interval_unit="DAYS",
-                ),
-                tags_to_add={
-                    "CreatedBy": "dlm",
-                    "OpenClawData": "true",
-                    "OpenClawStack": pulumi.get_stack(),
-                },
-            )
-        ],
-    ),
-    tags={
-        "Name": f"{prefix}-data-volume-snapshot-policy",
-    },
-)
-
-# Attach data volume to the Spot instance.
-# delete_before_replace prevents VolumeInUse errors during replacement.
-aws.ec2.VolumeAttachment(
-    f"{prefix}-data-volume-attachment",
-    device_name=data_device_name,
-    volume_id=data_volume.id,
-    instance_id=spot.spot_instance_id,
-    stop_instance_before_detaching=True,
-    opts=pulumi.ResourceOptions(
-        depends_on=[spot, data_volume],
-        delete_before_replace=True,
-    ),
-)
 
 aws.ec2.Tag(
     f"{prefix}-spot-name-tag",
@@ -477,12 +396,10 @@ aws.ec2.EipAssociation(
 # -----------------------------------------------------------------------------
 
 
-def create_dashboard_body(args: list[str]) -> str:
+def create_dashboard_body(instance_id: str) -> str:
     """Create minimal dashboard JSON via extracted module."""
-    instance_id, volume_id = args[0], args[1]
     return create_minimal_dashboard_body(
         instance_id=instance_id,
-        volume_id=volume_id,
         aws_region=aws_region,
         stack_name=pulumi.get_stack(),
     )
@@ -493,9 +410,7 @@ def create_dashboard_body(args: list[str]) -> str:
 dashboard = aws.cloudwatch.Dashboard(
     f"{prefix}-dashboard",
     dashboard_name=f"{prefix}-observability",
-    dashboard_body=pulumi.Output.all(spot.spot_instance_id, data_volume.id).apply(
-        create_dashboard_body
-    ),
+    dashboard_body=spot.spot_instance_id.apply(create_dashboard_body),
 )
 
 # Export useful information
@@ -505,8 +420,6 @@ pulumi.export("instance_id", spot.spot_instance_id)
 pulumi.export("public_ip", ec2_eip.public_ip)
 pulumi.export("spot_request_id", spot.id)
 pulumi.export("iam_role_arn", ec2_role.arn)
-pulumi.export("data_volume_id", data_volume.id)
-pulumi.export("data_volume_device_name", data_device_name)
 
 # SSM Session Manager connect command
 pulumi.export(
@@ -524,3 +437,6 @@ pulumi.export(
         dashboard.dashboard_name,
     ),
 )
+
+# Expose the configured root volume size for bookkeeping
+pulumi.export("root_volume_size_gib", root_volume_size_gib)

@@ -75,8 +75,7 @@ Contains the complete infrastructure definition:
 - Security groups (SSM-only access, no inbound ports)
 - EC2 Spot instance with persistent request type
 - Elastic IP for stable public addressing
-- EBS data volume with encryption
-- Data Lifecycle Manager (DLM) policy for automated snapshots
+- Root EBS volume with encryption
 - IAM roles and instance profile (SSM, ECR, CloudWatch, Parameter Store access)
 - Cross-stack reference to platform stack for ECR URL
 - CloudWatch Dashboard resource wired to `dashboard_builder.py`
@@ -84,7 +83,7 @@ Contains the complete infrastructure definition:
 #### `dashboard_builder.py` - Dashboard Builders
 Pure-Python CloudWatch dashboard composition:
 - Metric and log widget definitions
-- Namespaced metrics for `AWS/EC2`, `AWS/EBS`, `AWS/SSM`, and `OpenClawLab/EC2`
+- Namespaced metrics for `AWS/EC2`, `AWS/SSM`, and `OpenClawLab/EC2`
 - Log Insights query targeting stable log group `/aws/ec2/openclaw-lab`
 - JSON dashboard body assembly consumed by `aws.cloudwatch.Dashboard`
 
@@ -111,16 +110,15 @@ Builds the complete cloud-init YAML:
 #### `ARCHITECTURE.md` - Design Documentation
 Detailed architecture notes:
 - Data vs. secret persistence strategy
-- Snapshot-first recovery model
-- DLM snapshot lifecycle policies
-- Operational runbook for common tasks (deploy, restore, snapshot management)
+- S3 backup/restore flow
+- Operational runbook for common tasks (deploy, restore, backup verification)
 - Troubleshooting guide
 
 #### `DASHBOARD.md` - CloudWatch Dashboard Guide
 Comprehensive observability documentation:
 - Current dashboard layout and widget inventory sourced from `dashboard_builder.py`
 - Detailed metric explanations and thresholds
-- Widget categories (CPU, Memory, Disk, Network, EBS, SSM)
+- Widget categories (CPU, Memory, Disk, Network, SSM)
 - CloudWatch Logs Insights query guide
 - Recommended alarms and cost optimization tips
 
@@ -129,15 +127,14 @@ Comprehensive observability documentation:
 #### `cloud-config.yaml.j2` - Main Cloud-Init Script
 Multi-stage cloud-init configuration:
 1. Install Docker Compose, CloudWatch agent, jq
-2. Mount EBS data volume at `/opt/openclaw` in `bootcmd` before deferred writes
+2. Create `/opt/openclaw` directories for OpenClaw state and workspace
 3. Configure and start CloudWatch agent
 4. Write systemd service file for OpenClaw
 5. Fetch secrets from SSM Parameter Store into `/run/openclaw/.env`
 6. Pull Docker images from ECR and start OpenClaw via Docker Compose
 
 Notes:
-- EC2 attachment name (for example `/dev/sdf`) may appear as `/dev/nvme*` in guest OS on Nitro instances.
-- Device detection uses configured name + filesystem label + non-root fallback.
+- `/opt/openclaw` lives on the root filesystem.
 
 #### `openclaw-service.conf` - Systemd Service
 Systemd service unit for OpenClaw:
@@ -178,7 +175,7 @@ platform/
 Long-lived platform resources:
 - GitHub OIDC provider (optional, account-scoped)
 - IAM role for GitHub Actions with OIDC trust policy
-- IAM policies for EC2, EBS, ECR, SSM, DLM, and STS operations
+- IAM policies for EC2, ECR, SSM, and STS operations
 - Private ECR repository for OpenClaw Docker images
 
 **Exports**: `ecr_repository_url`, `oidc_provider_arn`, `github_actions_role_arn`
@@ -257,7 +254,7 @@ Pulumi project metadata:
 ### `Pulumi.dev.yaml` (both stacks)
 Stack-specific configuration values:
 - **Platform**: `github_repo`, `create_oidc_provider`
-- **EC2 Spot**: `availability_zone`, `instance_type`, `cidr_block`, `ami`, data volume settings, snapshot settings
+- **EC2 Spot**: `availability_zone`, `instance_type`, `cidr_block`, `ami`, `root_volume_size_gib`
 
 ### `pyproject.toml` (both stacks)
 Python project configuration:
@@ -269,7 +266,7 @@ Python project configuration:
 
 1. **Pure-Python Helpers**: Network and template utilities avoid Pulumi imports for testability
 2. **Cloud-Init Automation**: Complete instance bootstrap via cloud-init (no manual SSH setup)
-3. **Snapshot-First Recovery**: Data persisted via scheduled EBS snapshots, not retained volumes
+3. **S3 Backup**: Data persisted via periodic S3 sync and restored on boot
 4. **Secrets Hygiene**: Secrets fetched from SSM Parameter Store at runtime, not persisted on disk
 5. **Infrastructure as Code**: All resources defined in Pulumi (no manual AWS console changes)
 6. **SSM-Only Access**: No SSH keys or open inbound ports; access via AWS Systems Manager
@@ -287,11 +284,9 @@ Current widget coverage:
 - EC2 status checks
 - EC2 network I/O
 - Filtered OpenClaw container logs (CloudWatch Logs Insights)
-- EBS throughput and operations
 - Disk used % for `/` and `/opt/openclaw`
 - Disk I/O bytes (OpenClaw custom metrics)
 - SSM command status
-- EBS performance indicators (throughput %, consumed IOPS, idle time)
 
 For detailed and current dashboard behavior, see `ec2-spot/DASHBOARD.md`.
 
@@ -318,12 +313,6 @@ open $(cd ec2-spot && pulumi stack output dashboard_url)
   - CPU utilization (hypervisor view)
   - Network in/out
   - Status checks
-
-- **AWS/EBS Namespace**: EBS volume metrics
-  - Read/write operations and bytes
-  - Queue length, idle time
-  - Throughput percentage
-  - Consumed IOPS
 
 - **AWS/SSM Namespace**: Systems Manager metrics
   - Command execution status

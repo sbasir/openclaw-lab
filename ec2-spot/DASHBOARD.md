@@ -18,19 +18,16 @@ make openclaw-dashboard
 
 ## Current Widget Set
 
-The current implementation contains 11 widgets:
+The current implementation contains 8 widgets:
 
 1. **EC2 CPU Utilization** (`AWS/EC2: CPUUtilization`)
 2. **OpenClaw Memory Used %** (`OpenClawLab/EC2: MEM_USED_PERCENT`)
 3. **EC2 Status Checks** (`StatusCheckFailed*`)
 4. **EC2 Network In/Out** (`AWS/EC2`)
 5. **OpenClaw Container Logs (Filtered)** (CloudWatch Logs Insights)
-6. **EBS Throughput (Bytes)** (`AWS/EBS: VolumeReadBytes/VolumeWriteBytes`)
-7. **EBS Operations** (`AWS/EBS: VolumeReadOps/VolumeWriteOps/VolumeQueueLength`)
-8. **Disk Used % (Root + Data)** (`OpenClawLab/EC2: DISK_USED_PERCENT` with `path=/` and `path=/opt/openclaw`)
-9. **Disk I/O (CWAgent)** (`OpenClawLab/EC2: DISK_READ_BYTES/DISK_WRITE_BYTES`)
-10. **SSM Command Status** (`AWS/SSM: CommandsSucceeded/Failed/TimedOut`)
-11. **EBS Performance Indicators** (`VolumeThroughputPercentage`, `VolumeConsumedReadWriteOps`, `VolumeIdleTime`)
+6. **Disk Used % (Root + /opt/openclaw)** (`OpenClawLab/EC2: DISK_USED_PERCENT` with `path=/` and `path=/opt/openclaw`)
+7. **Disk I/O (CWAgent)** (`OpenClawLab/EC2: DISK_READ_BYTES/DISK_WRITE_BYTES`)
+8. **SSM Command Status** (`AWS/SSM: CommandsSucceeded/Failed/TimedOut`)
 
 ## Metric Namespaces and Dimensions
 
@@ -45,7 +42,6 @@ The current implementation contains 11 widgets:
 
 ### AWS namespaces
 - `AWS/EC2` for hypervisor metrics (CPU, network, status checks)
-- `AWS/EBS` for volume-level metrics (throughput/ops/perf)
 - `AWS/SSM` for command status
 
 ## Logs Integration
@@ -55,6 +51,7 @@ The dashboard log widget queries stable log group:
 - Log group: `/aws/ec2/openclaw-lab`
 - Stream model: `{instance_id}/...`
 - Widget filters to this instance’s docker stream and OpenClaw-relevant patterns.
+- Backup/restore sync logs are published to `{instance_id}/s3-backup` and `{instance_id}/s3-restore`.
 
 Current query shape:
 

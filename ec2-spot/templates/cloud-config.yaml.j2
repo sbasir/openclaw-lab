@@ -7,76 +7,8 @@ packages:
   - awscli
   - amazon-cloudwatch-agent
 
-bootcmd:
-  - |
-    OPENCLAW_HOME="/opt/openclaw"
-    OPENCLAW_DATA_DEVICE="{{ openclaw_data_device_name }}"
-    mkdir -p "$OPENCLAW_HOME"
-
-    ROOT_SOURCE=$(findmnt -n -o SOURCE /)
-    ROOT_PARENT=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || true)
-    if [ -n "$ROOT_PARENT" ]; then
-      ROOT_DEVICE="/dev/$ROOT_PARENT"
-    else
-      ROOT_DEVICE=$(echo "$ROOT_SOURCE" | sed 's/p[0-9]\+$//')
-    fi
-
-    DATA_DEVICE=""
-    for _ in $(seq 1 60); do
-      if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
-        DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
-      fi
-
-      if [ -z "$DATA_DEVICE" ]; then
-        LABEL_DEVICE=$(blkid -L OPENCLAW_DATA 2>/dev/null || true)
-        if [ -n "$LABEL_DEVICE" ] && [ -b "$LABEL_DEVICE" ]; then
-          DATA_DEVICE="$LABEL_DEVICE"
-        fi
-      fi
-
-      if [ -z "$DATA_DEVICE" ]; then
-        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "^$ROOT_DEVICE$" | head -n1 || true)
-      fi
-
-      if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
-        break
-      fi
-
-      echo "Waiting for data device to be available..."
-      sleep 5
-    done
-
-    if [ -z "$DATA_DEVICE" ] || [ ! -b "$DATA_DEVICE" ]; then
-      echo "ERROR: No data device found for $OPENCLAW_HOME" >&2
-      lsblk -pnro NAME,TYPE >&2
-      exit 1
-    fi
-
-    if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
-      mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
-    fi
-
-    UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
-    if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
-      echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
-    fi
-
-    mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
 
 write_files:
-  - path: /opt/aws/amazon-cloudwatch-agent/etc/config.json
-    owner: root:root
-    permissions: '0644'
-    content: |
-      {{ cloudwatch_agent_config | indent(width=6) }}
-
-  - path: /opt/openclaw/docker-compose.yaml
-    owner: ec2-user:ec2-user
-    permissions: '0644'
-    defer: true
-    content: |
-      {{ docker_compose_config | indent(width=6) }}
-
   - path: /etc/systemd/system/openclaw.service
     owner: root:root
     permissions: '0644'
@@ -84,12 +16,123 @@ write_files:
     content: |
       {{ openclaw_service | indent(width=6) }}
 
-  - path: /opt/openclaw/auto-approve-devices.sh
-    owner: ec2-user:ec2-user
+  - path: /var/log/openclaw-s3-restore.log
+    owner: root:root
+    permissions: '0644'
+    content: |
+      
+
+  - path: /var/log/openclaw-s3-backup.log
+    owner: root:root
+    permissions: '0644'
+    content: |
+      
+
+  - path: /usr/local/bin/openclaw-s3-restore.sh
+    owner: root:root
     permissions: '0755'
     defer: true
     content: |
-      {{ auto_approve_devices_script | indent(width=6) }}
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OPENCLAW_HOME="/opt/openclaw"
+      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
+      AWS_REGION="{{ aws_region }}"
+      LOG_FILE="/var/log/openclaw-s3-restore.log"
+
+      mkdir -p "$OPENCLAW_HOME/.openclaw"
+      {
+        echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
+        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION" --delete
+        chown -R ec2-user:ec2-user "$OPENCLAW_HOME/.openclaw"
+        restored_files_count="$(find "$OPENCLAW_HOME/.openclaw" -mindepth 1 -type f | wc -l || true)"
+        if [ "${restored_files_count:-0}" -eq 0 ]; then
+          echo "$(date -Iseconds) Restore completed, but no files were found in s3://$BACKUP_BUCKET (bucket may be empty, e.g., on first deployment)"
+        else
+          echo "$(date -Iseconds) Restore complete; restored ${restored_files_count} file(s) from s3://$BACKUP_BUCKET"
+        fi
+        echo "$(date -Iseconds) Restore complete"
+      } >> "$LOG_FILE" 2>&1
+
+  - path: /usr/local/bin/openclaw-s3-backup.sh
+    owner: root:root
+    permissions: '0755'
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OPENCLAW_HOME="/opt/openclaw"
+      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
+      AWS_REGION="{{ aws_region }}"
+      LOG_FILE="/var/log/openclaw-s3-backup.log"
+
+      if [ ! -d "$OPENCLAW_HOME/.openclaw" ]; then
+        echo "$(date -Iseconds) ERROR: $OPENCLAW_HOME/.openclaw does not exist" >> "$LOG_FILE" 2>&1
+        exit 1
+      fi
+
+      {
+        echo "$(date -Iseconds) Starting backup to s3://$BACKUP_BUCKET"
+        aws s3 sync "$OPENCLAW_HOME/.openclaw/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION"
+        echo "$(date -Iseconds) Backup complete"
+      } >> "$LOG_FILE" 2>&1
+
+  - path: /etc/systemd/system/openclaw-s3-restore.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw restore from S3 backup
+      After=network-online.target
+      Wants=network-online.target
+      Before=openclaw.service
+
+      [Service]
+      Type=oneshot
+      User=root
+      ExecStart=/usr/local/bin/openclaw-s3-restore.sh
+      SyslogIdentifier=openclaw-s3-restore
+
+      [Install]
+      WantedBy=multi-user.target
+      RemainAfterExit=yes
+
+  - path: /etc/systemd/system/openclaw-s3-backup.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw backup to S3
+      After=network-online.target openclaw-s3-restore.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User=root
+      ExecStart=/usr/local/bin/openclaw-s3-backup.sh
+      SyslogIdentifier=openclaw-s3-backup
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-s3-backup.timer
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=Run OpenClaw S3 backup every 20 minutes
+      Requires=openclaw-s3-backup.service
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=20min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
 
   - path: /etc/systemd/system/openclaw-auto-approve.service
     owner: root:root
@@ -139,10 +182,6 @@ runcmd:
 
   - |
     OPENCLAW_HOME="/opt/openclaw"
-    if ! mountpoint -q "$OPENCLAW_HOME"; then
-      echo "ERROR: $OPENCLAW_HOME is not mounted on the persistent data volume" >&2
-      exit 1
-    fi
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
@@ -164,17 +203,31 @@ runcmd:
 
   - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
+  # Download bootstrap scripts from S3 (keeps cloud-config under 16KB limit)
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" /opt/openclaw/auto-approve-devices.sh || { echo "Failed to download auto-approve-devices.sh from s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" >&2; exit 1; }
+    chmod 755 /opt/openclaw/auto-approve-devices.sh  
+    chown ec2-user:ec2-user /opt/openclaw/auto-approve-devices.sh
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" /opt/aws/amazon-cloudwatch-agent/etc/config.json || { echo "Failed to download cloudwatch-agent-config.json from s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" >&2; exit 1; }  
+    chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/config.json
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" /opt/openclaw/docker-compose.yaml || { echo "Failed to download docker-compose.yaml from s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" >&2; exit 1; } 
+    chmod 644 /opt/openclaw/docker-compose.yaml
+    chown ec2-user:ec2-user /opt/openclaw/docker-compose.yaml
+
   - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json
 
   - systemctl enable docker.service
   - systemctl start docker.service
 
   - systemctl daemon-reload
+  - systemctl enable openclaw-s3-backup.timer
+  - systemctl start openclaw-s3-backup.timer
   - systemctl enable openclaw.service
   - systemctl start openclaw.service
-  - sleep 5
-  - sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw
 
-  - systemctl enable openclaw-auto-approve.service
   - systemctl enable openclaw-auto-approve.timer
   - systemctl start openclaw-auto-approve.timer

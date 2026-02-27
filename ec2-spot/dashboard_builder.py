@@ -161,81 +161,6 @@ def _build_logs_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
     }
 
 
-def _build_ebs_throughput_widget(volume_id: str, aws_region: str) -> dict[str, Any]:
-    return {
-        "type": "metric",
-        "x": 0,
-        "y": 12,
-        "width": 12,
-        "height": 6,
-        "properties": {
-            "title": "EBS Throughput (Bytes)",
-            "region": aws_region,
-            "view": "timeSeries",
-            "stacked": False,
-            "period": 300,
-            "metrics": [
-                [
-                    "AWS/EBS",
-                    "VolumeReadBytes",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Sum", "label": "VolumeReadBytes"},
-                ],
-                [
-                    "AWS/EBS",
-                    "VolumeWriteBytes",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Sum", "label": "VolumeWriteBytes"},
-                ],
-            ],
-            "yAxis": {"left": {"min": 0}},
-        },
-    }
-
-
-def _build_ebs_ops_widget(volume_id: str, aws_region: str) -> dict[str, Any]:
-    return {
-        "type": "metric",
-        "x": 12,
-        "y": 12,
-        "width": 12,
-        "height": 6,
-        "properties": {
-            "title": "EBS Operations",
-            "region": aws_region,
-            "view": "timeSeries",
-            "stacked": False,
-            "period": 300,
-            "metrics": [
-                [
-                    "AWS/EBS",
-                    "VolumeReadOps",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Sum", "label": "VolumeReadOps"},
-                ],
-                [
-                    "AWS/EBS",
-                    "VolumeWriteOps",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Sum", "label": "VolumeWriteOps"},
-                ],
-                [
-                    "AWS/EBS",
-                    "VolumeQueueLength",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Average", "label": "VolumeQueueLength"},
-                ],
-            ],
-            "yAxis": {"left": {"min": 0}},
-        },
-    }
-
-
 def _build_ec2_disk_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
     return {
         "type": "metric",
@@ -244,7 +169,7 @@ def _build_ec2_disk_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
         "width": 8,
         "height": 6,
         "properties": {
-            "title": "Disk Used % (Root + Data)",
+            "title": "Disk Used % (Root + /opt/openclaw)",
             "region": aws_region,
             "view": "timeSeries",
             "stacked": False,
@@ -266,7 +191,7 @@ def _build_ec2_disk_widget(instance_id: str, aws_region: str) -> dict[str, Any]:
                     instance_id,
                     "path",
                     "/opt/openclaw",
-                    {"stat": "Average", "label": "Data /opt/openclaw"},
+                    {"stat": "Average", "label": "/opt/openclaw"},
                 ],
             ],
             "yAxis": {"left": {"min": 0, "max": 100}},
@@ -331,58 +256,16 @@ def _build_ssm_widget(aws_region: str) -> dict[str, Any]:
     }
 
 
-def _build_ebs_performance_widget(volume_id: str, aws_region: str) -> dict[str, Any]:
-    return {
-        "type": "metric",
-        "x": 0,
-        "y": 24,
-        "width": 24,
-        "height": 6,
-        "properties": {
-            "title": "EBS Performance Indicators",
-            "region": aws_region,
-            "view": "timeSeries",
-            "stacked": False,
-            "period": 300,
-            "metrics": [
-                [
-                    "AWS/EBS",
-                    "VolumeThroughputPercentage",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Average", "label": "Throughput%"},
-                ],
-                [
-                    "AWS/EBS",
-                    "VolumeConsumedReadWriteOps",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Average", "label": "ConsumedIOPS"},
-                ],
-                [
-                    "AWS/EBS",
-                    "VolumeIdleTime",
-                    "VolumeId",
-                    volume_id,
-                    {"stat": "Average", "label": "IdleTime"},
-                ],
-            ],
-            "yAxis": {"left": {"min": 0}},
-        },
-    }
-
-
 def create_minimal_dashboard_body(
     *,
     instance_id: str,
-    volume_id: str,
     aws_region: str,
     stack_name: str,
 ) -> str:
     """Create a minimal, known-good CloudWatch dashboard body with multiple widgets.
 
-    The dashboard includes key categories (CPU, memory, network, disk, EBS, SSM, and
-    logs) and is intentionally kept small and well-defined to validate schema
+    The dashboard includes key categories (CPU, memory, network, disk, SSM, and logs)
+    and is intentionally kept small and well-defined to validate schema
     correctness before incrementally adding more widgets.
     """
     body = {
@@ -392,12 +275,9 @@ def create_minimal_dashboard_body(
             _build_status_widget(instance_id, aws_region),
             _build_network_widget(instance_id, aws_region),
             _build_logs_widget(instance_id, aws_region),
-            _build_ebs_throughput_widget(volume_id, aws_region),
-            _build_ebs_ops_widget(volume_id, aws_region),
             _build_ec2_disk_widget(instance_id, aws_region),
             _build_ec2_disk_bytes_widget(instance_id, aws_region),
             _build_ssm_widget(aws_region),
-            _build_ebs_performance_widget(volume_id, aws_region),
         ]
     }
     return json.dumps(body)
