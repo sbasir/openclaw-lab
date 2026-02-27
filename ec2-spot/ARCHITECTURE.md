@@ -4,8 +4,7 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack a
 
 ## Current Behavior (as implemented)
 
-- A dedicated EBS volume is created and attached to the Spot instance.
-- Cloud-init mounts that volume at `/opt/openclaw`.
+- The root EBS volume (size controlled by `root_volume_size_gib`) is used for persistent storage; `/opt/openclaw` lives on the root filesystem.
 - Runtime artifacts under `/opt/openclaw` are persisted, including:
   - `docker-compose.yaml`
   - `.openclaw/` state
@@ -124,82 +123,60 @@ Recommended path split
 
 ## Runbook
 
-### 1) Choose instance type + AZ before deployment
+### 1) Choose instance type and AZ
+
+Inspect spot prices first:
 
 ```bash
 make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium" REGION=me-central-1
 ```
 
-Then set stack config:
+Then configure the stack:
 
 ```bash
 cd ec2-spot
 pulumi config set instance_type t4g.small
 pulumi config set availability_zone me-central-1a
+# optionally adjust the root volume size (default 15 GiB)
+# pulumi config set root_volume_size_gib 20
 ```
 
-### 2) Deploy fresh (no snapshot restore)
+### 2) Deploy or redeploy
+
+The instance boots, runs cloud-init and automatically restores any data
+present in the S3 backup bucket before starting OpenClaw.  No manual
+snapshot or extra config is required:
 
 ```bash
 cd ec2-spot
-pulumi config rm data_volume_snapshot_id || true
 pulumi up
 ```
 
-### 3) Restore from a snapshot
+If you wish to start from an empty state, make sure the S3 bucket is
+empty or disabled before provisioning.
 
-List candidate snapshots:
+### 3) Restore from backup
 
-```bash
-aws ec2 describe-snapshots \
-  --region me-central-1 \
-  --owner-ids self \
-  --filters \
-    Name=tag:OpenClawData,Values=true \
-    Name=tag:OpenClawStack,Values=dev \
-  --query 'Snapshots[*].[StartTime,SnapshotId,Tags[?Key==`OpenClawAz`]|[0].Value,State]' \
-  --output table
-```
-
-Set restore snapshot and matching AZ, then deploy:
+Any data previously synced to the bucket will be fetched on boot.  To
+perform a selective recovery you can:
 
 ```bash
-cd ec2-spot
-pulumi config set data_volume_snapshot_id snap-xxxxxxxxxxxxxxxxx
-pulumi config set availability_zone me-central-1a
-pulumi up
+# copy objects from your recovery bucket to the active bucket
+aws s3 sync s3://my-archive-bucket/ s3://openclaw-backup-<stack>/ --region me-central-1
+# then reboot or reprovision the instance
 ```
 
-Notes:
-- The stack enforces AZ guardrails using snapshot tag `OpenClawAz`.
-- If snapshot tag is missing/mismatched, `pulumi up` fails fast.
+### 4) Destroying the stack
 
-### 4) Safe destroy with an explicit final snapshot
-
-Get current data volume ID:
-
-```bash
-cd ec2-spot
-DATA_VOLUME_ID=$(pulumi stack output data_volume_id)
-echo "$DATA_VOLUME_ID"
-```
-
-Create final manual snapshot before destroy:
-
-```bash
-aws ec2 create-snapshot \
-  --region me-central-1 \
-  --volume-id "$DATA_VOLUME_ID" \
-  --description "openclaw final snapshot before destroy" \
-  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=OpenClawData,Value=true},{Key=OpenClawStack,Value=dev},{Key=OpenClawAz,Value=me-central-1a},{Key=CreatedBy,Value=manual-final}]'
-```
-
-Then destroy:
+Simply run the normal destroy; the root volume is deleted.  Persistent
+state lives in the S3 bucket, so no further action is required.  If you
+want a final copy, perform an `aws s3 sync` before tearing down.
 
 ```bash
 cd ec2-spot
 pulumi destroy
 ```
+
 
 ### 5) Verify DLM policy + retention
 

@@ -101,27 +101,6 @@ def test_build_user_data_requires_scripts_bucket() -> None:
         )
 
 
-def test_build_user_data_includes_data_device_name() -> None:
-    user_data = build_user_data(
-        aws_region="us-east-1",
-        ecr_repository_url="123.dkr.ecr.us-east-1.amazonaws.com/foo",
-        openclaw_data_device_name="/dev/sdg",
-        s3_backup_bucket_name="openclaw-backup-test",
-        s3_scripts_bucket_name="openclaw-scripts-test",
-    )
-
-    assert 'OPENCLAW_DATA_DEVICE="/dev/sdg"' in user_data
-    assert "ROOT_SOURCE=$(findmnt -n -o SOURCE /)" in user_data
-    assert (
-        'ROOT_PARENT=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || true)'
-        in user_data
-    )
-    assert 'if [ -b "$OPENCLAW_DATA_DEVICE" ]; then' in user_data
-    assert "LABEL_DEVICE=$(blkid -L OPENCLAW_DATA 2>/dev/null || true)" in user_data
-    assert 'DATA_DEVICE="$OPENCLAW_DATA_DEVICE"' in user_data
-    assert 'mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"' in user_data
-
-
 def test_extract_ecr_registry_domain_returns_registry_part() -> None:
     assert (
         extract_ecr_registry_domain(

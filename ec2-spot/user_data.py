@@ -3,7 +3,6 @@
 from template_helpers import render_template
 
 DEFAULT_COMPOSE_VERSION = "v5.0.2"
-DEFAULT_OPENCLAW_DATA_DEVICE_NAME = "/dev/sdf"
 
 
 def extract_ecr_registry_domain(ecr_repository_url: str) -> str:
@@ -30,7 +29,6 @@ def extract_ecr_registry_domain(ecr_repository_url: str) -> str:
 def build_user_data(
     aws_region: str,
     ecr_repository_url: str,
-    openclaw_data_device_name: str = DEFAULT_OPENCLAW_DATA_DEVICE_NAME,
     s3_backup_bucket_name: str | None = None,
     s3_scripts_bucket_name: str | None = None,
 ) -> str:
@@ -48,13 +46,10 @@ def build_user_data(
         AWS region for SSM Parameter Store access and ECR authentication.
     ecr_repository_url : str
         Full ECR repository URL (e.g., '123456789012.dkr.ecr.us-east-1.amazonaws.com/openclaw').
-    openclaw_data_device_name : str, optional
-        Device name for the persistent data volume (default: '/dev/sdf').
     s3_backup_bucket_name : str
-        S3 bucket name for OpenClaw backup/restore sync.
+        S3 bucket name for OpenClaw backup/restore sync (required).
     s3_scripts_bucket_name : str
         S3 bucket name containing bootstrap scripts (to keep cloud-init under 16KB).
-
     Returns
     -------
     str
@@ -79,7 +74,6 @@ def build_user_data(
         "openclaw_service": render_template("openclaw-service.conf", service_context),
         "aws_region": aws_region,
         "ecr_registry_domain": registry_domain,
-        "openclaw_data_device_name": openclaw_data_device_name,
         "s3_backup_bucket_name": s3_backup_bucket_name,
         "s3_scripts_bucket_name": s3_scripts_bucket_name,
     }

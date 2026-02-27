@@ -126,8 +126,7 @@ Configuration is managed via `pulumi config set` (stored in `Pulumi.dev.yaml` or
 - `instance_type` (optional): Default `t4g.small`
 - `cidr_block` (optional): VPC CIDR, default `10.0.0.0/16`
 - `ami` (optional): Override default Amazon Linux 2023 AMI
-- `data_volume_size_gib` (optional): Default `20`
-- `data_device_name` (optional): Default `/dev/sdf`
+- `root_volume_size_gib` (optional): Default `15` (controls size of the root EBS volume)
 <!-- snapshot configuration options retired; backups now use S3 bucket -->
 <!-- keep here for historical reference but they are ignored by the stack -->
 

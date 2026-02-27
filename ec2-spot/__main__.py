@@ -35,10 +35,8 @@ ami_override = config.get("ami")
 ec2_instance_type = config.get("instance_type") or "t4g.small"  # 2 VCPUs, 2 GB RAM
 # set via: pulumi config set cidr_block 10.0.0.0/16 --stack dev
 cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
-# set via: pulumi config set data_volume_size_gib 20 --stack dev
-data_volume_size_gib = int(config.get("data_volume_size_gib") or "20")
-# set via: pulumi config set data_device_name /dev/sdf --stack dev
-data_device_name = config.get("data_device_name") or "/dev/sdf"
+# set via: pulumi config set root_volume_size_gib 15 --stack dev
+root_volume_size_gib = int(config.get("root_volume_size_gib") or "15")
 # set via: pulumi config set availability_zone me-central-1a --stack dev
 availability_zone = config.require("availability_zone")
 
@@ -338,7 +336,6 @@ spot = aws.ec2.SpotInstanceRequest(
         lambda args: build_user_data(
             aws_region=aws_region,
             ecr_repository_url=args[0],
-            openclaw_data_device_name=data_device_name,
             s3_backup_bucket_name=args[1],
             s3_scripts_bucket_name=args[2],
         )
@@ -358,7 +355,7 @@ spot = aws.ec2.SpotInstanceRequest(
     # Root volume configuration
     root_block_device={
         "volume_type": "gp3",
-        "volume_size": 8,
+        "volume_size": root_volume_size_gib,
         "delete_on_termination": True,
         "encrypted": True,
     },
@@ -368,36 +365,6 @@ spot = aws.ec2.SpotInstanceRequest(
     },
 )
 
-# Dedicated EBS volume for persistent OpenClaw data.
-# Tagged for DLM snapshot lifecycle management.
-data_volume = aws.ebs.Volume(
-    f"{prefix}-data-volume",
-    availability_zone=selected_az,
-    size=data_volume_size_gib,
-    type="gp3",
-    encrypted=True,
-    tags={
-        "Name": f"{prefix}-data-volume",
-        "Purpose": "OpenClaw Persistent Data",
-        "OpenClawData": "true",
-        "OpenClawStack": pulumi.get_stack(),
-    },
-)
-# Snapshot lifecycle policy is no longer created; backups are handled via
-# S3 sync instead.
-# Attach data volume to the Spot instance.
-# delete_before_replace prevents VolumeInUse errors during replacement.
-aws.ec2.VolumeAttachment(
-    f"{prefix}-data-volume-attachment",
-    device_name=data_device_name,
-    volume_id=data_volume.id,
-    instance_id=spot.spot_instance_id,
-    stop_instance_before_detaching=True,
-    opts=pulumi.ResourceOptions(
-        depends_on=[spot, data_volume],
-        delete_before_replace=True,
-    ),
-)
 
 aws.ec2.Tag(
     f"{prefix}-spot-name-tag",
@@ -429,12 +396,12 @@ aws.ec2.EipAssociation(
 # -----------------------------------------------------------------------------
 
 
-def create_dashboard_body(args: list[str]) -> str:
+def create_dashboard_body(instance_id: str) -> str:
     """Create minimal dashboard JSON via extracted module."""
-    instance_id, volume_id = args[0], args[1]
     return create_minimal_dashboard_body(
         instance_id=instance_id,
-        volume_id=volume_id,
+        # volume_id is no longer tracked separately; workspace lives on root disk
+        volume_id="",
         aws_region=aws_region,
         stack_name=pulumi.get_stack(),
     )
@@ -445,9 +412,7 @@ def create_dashboard_body(args: list[str]) -> str:
 dashboard = aws.cloudwatch.Dashboard(
     f"{prefix}-dashboard",
     dashboard_name=f"{prefix}-observability",
-    dashboard_body=pulumi.Output.all(spot.spot_instance_id, data_volume.id).apply(
-        create_dashboard_body
-    ),
+    dashboard_body=spot.spot_instance_id.apply(create_dashboard_body),
 )
 
 # Export useful information
@@ -457,8 +422,6 @@ pulumi.export("instance_id", spot.spot_instance_id)
 pulumi.export("public_ip", ec2_eip.public_ip)
 pulumi.export("spot_request_id", spot.id)
 pulumi.export("iam_role_arn", ec2_role.arn)
-pulumi.export("data_volume_id", data_volume.id)
-pulumi.export("data_volume_device_name", data_device_name)
 
 # SSM Session Manager connect command
 pulumi.export(
@@ -476,3 +439,6 @@ pulumi.export(
         dashboard.dashboard_name,
     ),
 )
+
+# Expose the configured root volume size for bookkeeping
+pulumi.export("root_volume_size_gib", root_volume_size_gib)

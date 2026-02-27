@@ -7,61 +7,6 @@ packages:
   - awscli
   - amazon-cloudwatch-agent
 
-bootcmd:
-  - |
-    OPENCLAW_HOME="/opt/openclaw"
-    OPENCLAW_DATA_DEVICE="{{ openclaw_data_device_name }}"
-    mkdir -p "$OPENCLAW_HOME"
-
-    ROOT_SOURCE=$(findmnt -n -o SOURCE /)
-    ROOT_PARENT=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || true)
-    if [ -n "$ROOT_PARENT" ]; then
-      ROOT_DEVICE="/dev/$ROOT_PARENT"
-    else
-      ROOT_DEVICE=$(echo "$ROOT_SOURCE" | sed 's/p[0-9]\+$//')
-    fi
-
-    DATA_DEVICE=""
-    for _ in $(seq 1 60); do
-      if [ -b "$OPENCLAW_DATA_DEVICE" ]; then
-        DATA_DEVICE="$OPENCLAW_DATA_DEVICE"
-      fi
-
-      if [ -z "$DATA_DEVICE" ]; then
-        LABEL_DEVICE=$(blkid -L OPENCLAW_DATA 2>/dev/null || true)
-        if [ -n "$LABEL_DEVICE" ] && [ -b "$LABEL_DEVICE" ]; then
-          DATA_DEVICE="$LABEL_DEVICE"
-        fi
-      fi
-
-      if [ -z "$DATA_DEVICE" ]; then
-        DATA_DEVICE=$(lsblk -pnro NAME,TYPE | awk '$2=="disk" {print $1}' | grep -v "^$ROOT_DEVICE$" | head -n1 || true)
-      fi
-
-      if [ -n "$DATA_DEVICE" ] && [ -b "$DATA_DEVICE" ]; then
-        break
-      fi
-
-      echo "Waiting for data device to be available..."
-      sleep 5
-    done
-
-    if [ -z "$DATA_DEVICE" ] || [ ! -b "$DATA_DEVICE" ]; then
-      echo "ERROR: No data device found for $OPENCLAW_HOME" >&2
-      lsblk -pnro NAME,TYPE >&2
-      exit 1
-    fi
-
-    if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
-      mkfs.ext4 -L OPENCLAW_DATA "$DATA_DEVICE"
-    fi
-
-    UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
-    if [ -n "$UUID" ] && ! grep -q "$UUID" /etc/fstab; then
-      echo "UUID=$UUID $OPENCLAW_HOME ext4 defaults,nofail 0 2" >> /etc/fstab
-    fi
-
-    mountpoint -q "$OPENCLAW_HOME" || mount "$OPENCLAW_HOME"
 
 write_files:
   - path: /etc/systemd/system/openclaw.service
@@ -229,10 +174,6 @@ runcmd:
 
   - |
     OPENCLAW_HOME="/opt/openclaw"
-    if ! mountpoint -q "$OPENCLAW_HOME"; then
-      echo "ERROR: $OPENCLAW_HOME is not mounted on the persistent data volume" >&2
-      exit 1
-    fi
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"

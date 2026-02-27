@@ -13,7 +13,6 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
         "openclaw_service": "[Unit]\nDescription=Demo Service",
         "aws_region": "ap-southeast-2",
         "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
-        "openclaw_data_device_name": "/dev/sdf",
         "s3_backup_bucket_name": "openclaw-backup-test",
         "s3_scripts_bucket_name": "openclaw-scripts-test",
     }
@@ -22,7 +21,6 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
 
     assert rendered.startswith("#cloud-config")
     assert "compose/releases/download/v9.9.9/docker-compose-linux-" in rendered
-    assert 'OPENCLAW_DATA_DEVICE="/dev/sdf"' in rendered
     assert "s3://openclaw-scripts-test/" in rendered
     assert "Description=Demo Service" in rendered
 

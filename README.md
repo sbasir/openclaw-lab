@@ -108,8 +108,9 @@ cd ec2-spot && pulumi stack output dashboard_url
 Pulumi config values for `ec2-spot` stack (`availability_zone` is required; others optional):
 
 ```bash
-pulumi config set data_volume_size_gib 20
-pulumi config set data_device_name /dev/sdf
+# size of the root EBS volume in GiB (default 15)
+pulumi config set root_volume_size_gib 20
+# availability zone for the instance
 pulumi config set availability_zone me-central-1a
 ```
 
