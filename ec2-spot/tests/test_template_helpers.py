@@ -17,6 +17,7 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
         "aws_region": "ap-southeast-2",
         "ecr_registry_domain": "123.dkr.ecr.ap-southeast-2.amazonaws.com",
         "openclaw_data_device_name": "/dev/sdf",
+        "s3_backup_bucket_name": "openclaw-backup-test",
     }
 
     rendered = render_template("cloud-config.yaml.j2", context)

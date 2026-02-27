@@ -3,3 +3,4 @@ config:
   openclaw-lab:ami: ami-076988f456083409b
   openclaw-lab:availability_zone: me-central-1b
   openclaw-lab:instance_type: m8g.medium
+  openclaw-lab:data_volume_snapshot_id: snap-083707de38fdea2a8

@@ -12,6 +12,8 @@ This stack manages ephemeral compute resources:
 The stack references the platform stack to obtain the ECR repository URL.
 """
 
+import json
+
 import pulumi
 import pulumi_aws as aws
 from network_helpers import (
@@ -77,6 +79,7 @@ platform_stack = pulumi.StackReference(
     f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}"
 )
 ecr_repository_url = platform_stack.require_output("ecr_repository_url")
+s3_backup_bucket_name = platform_stack.require_output("s3_backup_bucket_name")
 
 
 # -----------------------------------------------------------------------------
@@ -146,6 +149,37 @@ aws.iam.RolePolicy(
             }
         ],
     ).json,
+)
+
+aws.iam.RolePolicy(
+    f"{prefix}-s3-backup-policy",
+    role=ec2_role.name,
+    policy=s3_backup_bucket_name.apply(
+        lambda bucket: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "OpenClawS3Backup",
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:ListBucket",
+                            "s3:GetObject",
+                            "s3:PutObject",
+                            "s3:DeleteObject",
+                            "s3:AbortMultipartUpload",
+                            "s3:ListBucketMultipartUploads",
+                            "s3:ListMultipartUploadParts",
+                        ],
+                        "Resource": [
+                            f"arn:aws:s3:::{bucket}",
+                            f"arn:aws:s3:::{bucket}/*",
+                        ],
+                    }
+                ],
+            }
+        )
+    ),
 )
 
 # Instance Profile to attach the role to EC2
@@ -344,11 +378,12 @@ spot = aws.ec2.SpotInstanceRequest(
     subnet_id=subnet_in_selected_az.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
-    user_data=ecr_repository_url.apply(
-        lambda url: build_user_data(
+    user_data=pulumi.Output.all(ecr_repository_url, s3_backup_bucket_name).apply(
+        lambda args: build_user_data(
             aws_region=aws_region,
-            ecr_repository_url=url,
+            ecr_repository_url=args[0],
             openclaw_data_device_name=data_device_name,
+            s3_backup_bucket_name=args[1],
         )
     ),
     # Spot instance configuration: persistent request with stop behavior.

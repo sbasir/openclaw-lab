@@ -31,6 +31,7 @@ def build_user_data(
     aws_region: str,
     ecr_repository_url: str,
     openclaw_data_device_name: str = DEFAULT_OPENCLAW_DATA_DEVICE_NAME,
+    s3_backup_bucket_name: str | None = None,
 ) -> str:
     """Return the cloud-init script used to bootstrap the EC2 instance.
 
@@ -48,6 +49,8 @@ def build_user_data(
         Full ECR repository URL (e.g., '123456789012.dkr.ecr.us-east-1.amazonaws.com/openclaw').
     openclaw_data_device_name : str, optional
         Device name for the persistent data volume (default: '/dev/sdf').
+    s3_backup_bucket_name : str
+        S3 bucket name for OpenClaw backup/restore sync.
 
     Returns
     -------
@@ -62,6 +65,9 @@ def build_user_data(
         "ecr_registry_domain": registry_domain,
     }
 
+    if not s3_backup_bucket_name:
+        raise ValueError("s3_backup_bucket_name is required for backup/restore")
+
     context = {
         "compose_version": DEFAULT_COMPOSE_VERSION,
         "cloudwatch_agent_config": load_template_source("cloudwatch-agent-config.json"),
@@ -71,5 +77,6 @@ def build_user_data(
         "aws_region": aws_region,
         "ecr_registry_domain": registry_domain,
         "openclaw_data_device_name": openclaw_data_device_name,
+        "s3_backup_bucket_name": s3_backup_bucket_name,
     }
     return render_template("cloud-config.yaml.j2", context)

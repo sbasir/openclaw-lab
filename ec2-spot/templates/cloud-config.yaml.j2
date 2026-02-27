@@ -91,6 +91,118 @@ write_files:
     content: |
       {{ auto_approve_devices_script | indent(width=6) }}
 
+  - path: /var/log/openclaw-s3-restore.log
+    owner: ec2-user:ec2-user
+    permissions: '0644'
+    content: |
+      
+
+  - path: /var/log/openclaw-s3-backup.log
+    owner: ec2-user:ec2-user
+    permissions: '0644'
+    content: |
+      
+
+  - path: /usr/local/bin/openclaw-s3-restore.sh
+    owner: root:root
+    permissions: '0755'
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OPENCLAW_HOME="/opt/openclaw"
+      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
+      AWS_REGION="{{ aws_region }}"
+      LOG_FILE="/var/log/openclaw-s3-restore.log"
+
+      mkdir -p "$OPENCLAW_HOME"
+      {
+        echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
+        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/" --region "$AWS_REGION" --exclude ".env" --exclude ".env/*"
+        echo "$(date -Iseconds) Restore complete"
+      } >> "$LOG_FILE" 2>&1
+
+  - path: /usr/local/bin/openclaw-s3-backup.sh
+    owner: root:root
+    permissions: '0755'
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      OPENCLAW_HOME="/opt/openclaw"
+      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
+      AWS_REGION="{{ aws_region }}"
+      LOG_FILE="/var/log/openclaw-s3-backup.log"
+
+      if ! mountpoint -q "$OPENCLAW_HOME"; then
+        echo "$(date -Iseconds) ERROR: $OPENCLAW_HOME is not mounted" >> "$LOG_FILE" 2>&1
+        exit 1
+      fi
+
+      {
+        echo "$(date -Iseconds) Starting backup to s3://$BACKUP_BUCKET"
+        aws s3 sync "$OPENCLAW_HOME/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION" --delete --exclude ".env" --exclude ".env/*"
+        echo "$(date -Iseconds) Backup complete"
+      } >> "$LOG_FILE" 2>&1
+
+  - path: /etc/systemd/system/openclaw-s3-restore.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw restore from S3 backup
+      After=network-online.target
+      Wants=network-online.target
+      Before=openclaw.service
+
+      [Service]
+      Type=oneshot
+      User=ec2-user
+      Group=ec2-user
+      ExecStart=/usr/local/bin/openclaw-s3-restore.sh
+      SyslogIdentifier=openclaw-s3-restore
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-s3-backup.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw backup to S3
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User=ec2-user
+      Group=ec2-user
+      ExecStart=/usr/local/bin/openclaw-s3-backup.sh
+      SyslogIdentifier=openclaw-s3-backup
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-s3-backup.timer
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=Run OpenClaw S3 backup every 20 minutes
+      Requires=openclaw-s3-backup.service
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=20min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
   - path: /etc/systemd/system/openclaw-auto-approve.service
     owner: root:root
     permissions: '0644'
@@ -178,3 +290,7 @@ runcmd:
   - systemctl enable openclaw-auto-approve.service
   - systemctl enable openclaw-auto-approve.timer
   - systemctl start openclaw-auto-approve.timer
+  - systemctl enable openclaw-s3-backup.timer
+  - systemctl start openclaw-s3-backup.timer
+  - systemctl enable openclaw-s3-restore.service
+  - systemctl start openclaw-s3-restore.service

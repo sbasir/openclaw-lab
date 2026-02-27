@@ -284,6 +284,41 @@ ssm_policy = aws.iam.RolePolicy(
     ),
 )
 
+# S3 permissions: manage the OpenClaw backup bucket created in this stack.
+s3_platform_policy = aws.iam.RolePolicy(
+    f"{prefix}-s3-platform-policy",
+    role=github_actions_role.name,
+    policy=json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "S3BackupBucketManagement",
+                    "Effect": "Allow",
+                    "Action": [
+                        "s3:CreateBucket",
+                        "s3:DeleteBucket",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                        "s3:GetBucketTagging",
+                        "s3:PutBucketTagging",
+                        "s3:GetBucketEncryption",
+                        "s3:PutBucketEncryption",
+                        "s3:GetBucketPublicAccessBlock",
+                        "s3:PutBucketPublicAccessBlock",
+                        "s3:PutBucketVersioning",
+                        "s3:GetBucketVersioning",
+                    ],
+                    "Resource": [
+                        "arn:aws:s3:::openclaw-lab-backup-*",
+                        "arn:aws:s3:::openclaw-lab-backup-*/*",
+                    ],
+                }
+            ],
+        }
+    ),
+)
+
 # STS permissions: Pulumi uses get-caller-identity to determine the account.
 sts_policy = aws.iam.RolePolicy(
     f"{prefix}-sts-policy",
@@ -412,6 +447,35 @@ ecr_repo = aws.ecr.Repository(
     tags={"Name": f"{prefix}-ecr"},
 )
 
+# =============================================================================
+# S3 Backup Bucket
+# =============================================================================
+
+s3_backup_bucket_name = f"openclaw-lab-backup-{pulumi.get_stack()}-{account_id}".lower()
+
+s3_backup_bucket = aws.s3.Bucket(
+    f"{prefix}-backup-bucket",
+    bucket=s3_backup_bucket_name,
+    force_destroy=False,
+    server_side_encryption_configuration={
+        "rule": {
+            "apply_server_side_encryption_by_default": {
+                "sse_algorithm": "AES256",
+            },
+        },
+    },
+    tags={"Name": f"{prefix}-backup-bucket"},
+)
+
+aws.s3.BucketPublicAccessBlock(
+    f"{prefix}-backup-bucket-public-access",
+    bucket=s3_backup_bucket.id,
+    block_public_acls=True,
+    block_public_policy=True,
+    ignore_public_acls=True,
+    restrict_public_buckets=True,
+)
+
 # ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------
@@ -419,3 +483,5 @@ ecr_repo = aws.ecr.Repository(
 pulumi.export("github_actions_role_arn", github_actions_role.arn)
 pulumi.export("oidc_provider_arn", oidc_provider_arn)
 pulumi.export("ecr_repository_url", ecr_repo.repository_url)
+pulumi.export("s3_backup_bucket_name", s3_backup_bucket.bucket)
+pulumi.export("s3_backup_bucket_arn", s3_backup_bucket.arn)

@@ -55,6 +55,7 @@ The dashboard log widget queries stable log group:
 - Log group: `/aws/ec2/openclaw-lab`
 - Stream model: `{instance_id}/...`
 - Widget filters to this instance’s docker stream and OpenClaw-relevant patterns.
+- Backup/restore sync logs are published to `{instance_id}/s3-backup` and `{instance_id}/s3-restore`.
 
 Current query shape:
 

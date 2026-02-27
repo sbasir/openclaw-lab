@@ -14,6 +14,10 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack a
 - Data volume is tagged for AWS DLM snapshots with retention controls.
 - Volume lifecycle is snapshot-first; data volume itself is not retained on destroy.
 - CloudWatch agent is installed and configured for log collection and metrics monitoring.
+- S3 sync backup/restore keeps `/opt/openclaw` mirrored in a platform-managed bucket.
+  - Boot restore runs before `openclaw.service` starts.
+  - A systemd timer syncs back to S3 every 20 minutes.
+  - Backup/restore logs are collected in CloudWatch Logs.
 
 ## Snapshot-first model (current direction)
 
