@@ -11,22 +11,22 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack a
   - `.openclaw/` state
   - `auto-approve-devices.sh` helper script
 - Runtime secrets are generated at service start under `/run/openclaw/.env`.
-- Data volume is tagged for AWS DLM snapshots with retention controls.
-- Volume lifecycle is snapshot-first; data volume itself is not retained on destroy.
+- Data volume is tagged for AWS DLM snapshots with retention controls (legacy).
+- Volume lifecycle had been snapshot-first, but the workflow is being retired in favor of S3 backups.
 - CloudWatch agent is installed and configured for log collection and metrics monitoring.
-- S3 sync backup/restore keeps `/opt/openclaw` mirrored in a platform-managed bucket.
+- S3 sync backup/restore now keeps `/opt/openclaw` mirrored in a platform-managed bucket.
   - Boot restore runs before `openclaw.service` starts.
   - A systemd timer syncs back to S3 every 20 minutes.
   - Backup/restore logs are collected in CloudWatch Logs.
 
-## Snapshot-first model (current direction)
+## Snapshot-first model (legacy)
 
-Current strategy:
+This strategy was previously supported but is now deprecated in favor of S3 sync backups:
 
-- On schedule, DLM snapshots tagged OpenClaw data volumes.
-- DLM retention policy deletes old snapshots automatically.
-- On `pulumi destroy`, the data volume is deleted.
-- For restore, set `data_volume_snapshot_id` and re-deploy.
+- DLM snapshots were tagged OpenClaw data volumes on a schedule.
+- Retention policy cleaned up older snapshots automatically.
+- `pulumi destroy` caused data volume deletion; recovery required a snapshot ID.
+- Future work will remove this pattern once S3 backup proves reliable.
 
 This avoids orphaned retained volumes and keeps recovery explicit.
 

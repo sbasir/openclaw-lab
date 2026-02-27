@@ -39,32 +39,8 @@ cidr_block = canonicalize_ipv4_cidr(config.get("cidr_block") or "10.0.0.0/16")
 data_volume_size_gib = int(config.get("data_volume_size_gib") or "20")
 # set via: pulumi config set data_device_name /dev/sdf --stack dev
 data_device_name = config.get("data_device_name") or "/dev/sdf"
-# set via: pulumi config set data_volume_snapshot_id snap-0123456789abcdef0 --stack dev
-data_volume_snapshot_id = config.get("data_volume_snapshot_id")
 # set via: pulumi config set availability_zone me-central-1a --stack dev
 availability_zone = config.require("availability_zone")
-# set via: pulumi config set snapshot_schedule_interval_hours 24 --stack dev
-snapshot_schedule_interval_hours = int(
-    config.get("snapshot_schedule_interval_hours") or "24"
-)
-# set via: pulumi config set snapshot_schedule_time 03:00 --stack dev
-snapshot_schedule_time = config.get("snapshot_schedule_time")
-# set via: pulumi config set snapshot_retention_days 30 --stack dev
-snapshot_retention_days = int(config.get("snapshot_retention_days") or "30")
-
-if snapshot_retention_days < 1:
-    raise ValueError("snapshot_retention_days must be >= 1")
-
-if snapshot_schedule_interval_hours < 1:
-    raise ValueError("snapshot_schedule_interval_hours must be >= 1")
-
-if not snapshot_schedule_time and snapshot_schedule_interval_hours == 24:
-    snapshot_schedule_time = "03:00"
-
-if snapshot_schedule_time and snapshot_schedule_interval_hours != 24:
-    raise ValueError(
-        "snapshot_schedule_time can only be set when snapshot_schedule_interval_hours is 24"
-    )
 
 if not aws.config.region:
     raise ValueError("AWS region must be configured (e.g. 'me-central-1').")
@@ -214,36 +190,6 @@ ec2_instance_profile = aws.iam.InstanceProfile(
     tags={"Name": f"{prefix}-instance-profile"},
 )
 
-# IAM role for Data Lifecycle Manager to create and manage EBS snapshots.
-dlm_assume_role_policy = aws.iam.get_policy_document(
-    statements=[
-        {
-            "actions": ["sts:AssumeRole"],
-            "principals": [
-                {
-                    "type": "Service",
-                    "identifiers": ["dlm.amazonaws.com"],
-                }
-            ],
-        }
-    ]
-)
-
-dlm_role = aws.iam.Role(
-    f"{prefix}-dlm-role",
-    name=f"{prefix}-dlm-role",
-    assume_role_policy=dlm_assume_role_policy.json,
-    description="IAM role for AWS Data Lifecycle Manager snapshots",
-    tags={"Name": f"{prefix}-dlm-role"},
-)
-
-aws.iam.RolePolicyAttachment(
-    f"{prefix}-dlm-role-policy",
-    role=dlm_role.name,
-    policy_arn="arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole",
-)
-
-
 # -----------------------------------------------------------------------------
 # Networking: VPC, Subnets, Internet Gateway, Route Table, Security Group
 # -----------------------------------------------------------------------------
@@ -304,23 +250,6 @@ if availability_zone not in azs:
 
 selected_az = availability_zone
 
-if data_volume_snapshot_id:
-    snapshot = aws.ebs.get_snapshot(snapshot_ids=[data_volume_snapshot_id])
-    snapshot_expected_az = snapshot.tags.get("OpenClawAz") if snapshot.tags else None
-
-    if snapshot_expected_az and selected_az != snapshot_expected_az:
-        raise ValueError(
-            "Configured availability_zone does not match snapshot OpenClawAz tag: "
-            f"availability_zone='{selected_az}', snapshot OpenClawAz='{snapshot_expected_az}'."
-        )
-
-    if not snapshot_expected_az:
-        raise ValueError(
-            "Snapshot is missing required OpenClawAz tag; cannot validate AZ guardrail. "
-            "Any snapshot used (whether created by this stack's DLM policy or manually) "
-            "must be tagged with OpenClawAz matching the original data volume "
-            "availability_zone."
-        )
 
 pulumi.export("selected_az", selected_az)
 
@@ -447,55 +376,15 @@ data_volume = aws.ebs.Volume(
     size=data_volume_size_gib,
     type="gp3",
     encrypted=True,
-    snapshot_id=data_volume_snapshot_id,
     tags={
         "Name": f"{prefix}-data-volume",
         "Purpose": "OpenClaw Persistent Data",
         "OpenClawData": "true",
         "OpenClawStack": pulumi.get_stack(),
-        "OpenClawAz": selected_az,
     },
 )
-
-# Data Lifecycle Manager policy for automated EBS snapshots.
-# Snapshots are taken on schedule and pruned based on retention policy.
-aws.dlm.LifecyclePolicy(
-    f"{prefix}-data-volume-snapshot-policy",
-    description="OpenClaw data volume scheduled snapshots",
-    execution_role_arn=dlm_role.arn,
-    state="ENABLED",
-    policy_details=aws.dlm.LifecyclePolicyPolicyDetailsArgs(
-        resource_types=["VOLUME"],
-        target_tags={
-            "OpenClawData": "true",
-            "OpenClawStack": pulumi.get_stack(),
-        },
-        schedules=[
-            aws.dlm.LifecyclePolicyPolicyDetailsScheduleArgs(
-                name="openclaw-data-snapshot",
-                copy_tags=True,
-                create_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleCreateRuleArgs(
-                    interval=snapshot_schedule_interval_hours,
-                    interval_unit="HOURS",
-                    times=snapshot_schedule_time,
-                ),
-                retain_rule=aws.dlm.LifecyclePolicyPolicyDetailsScheduleRetainRuleArgs(
-                    interval=snapshot_retention_days,
-                    interval_unit="DAYS",
-                ),
-                tags_to_add={
-                    "CreatedBy": "dlm",
-                    "OpenClawData": "true",
-                    "OpenClawStack": pulumi.get_stack(),
-                },
-            )
-        ],
-    ),
-    tags={
-        "Name": f"{prefix}-data-volume-snapshot-policy",
-    },
-)
-
+# Snapshot lifecycle policy is no longer created; backups are handled via
+# S3 sync instead.
 # Attach data volume to the Spot instance.
 # delete_before_replace prevents VolumeInUse errors during replacement.
 aws.ec2.VolumeAttachment(

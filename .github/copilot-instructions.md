@@ -17,7 +17,7 @@ OpenClaw Lab is a Pulumi-based Infrastructure-as-Code project that manages OpenC
 2. **`ec2-spot/`** - Ephemeral compute (can be destroyed/recreated):
    - VPC with multi-AZ subnets (IPv4 + IPv6 via calculated CIDR blocks)
    - Security groups, IAM instance profile, Spot instance
-   - EBS data volume with DLM-managed snapshots
+   - EBS data volume (backed up via S3 sync; snapshot workflow retired)
    - Systemd service for OpenClaw
    - **Cross-stack reference** to platform stack for ECR URL
 
@@ -55,8 +55,8 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 
 - **Secrets**: Stored in **AWS SSM Parameter Store**, fetched at service start into `/run/openclaw/.env`
 - **Data**: Persisted on dedicated EBS volume at `/opt/openclaw` (includes `.openclaw/` state)
-- **Snapshots**: DLM-managed with configurable schedule (default: 24h) and retention (default: 30 days)
-- **Recovery**: Set `data_volume_snapshot_id` in stack config, re-deploy to restore
+- **Snapshots**: (legacy) previously DLM-managed daily snapshots
+  **now** replaced by S3 sync; data restores use the S3 bucket instead
 
 ### 4. CloudWatch Observability Dashboard
 
@@ -128,10 +128,8 @@ Configuration is managed via `pulumi config set` (stored in `Pulumi.dev.yaml` or
 - `ami` (optional): Override default Amazon Linux 2023 AMI
 - `data_volume_size_gib` (optional): Default `20`
 - `data_device_name` (optional): Default `/dev/sdf`
-- `data_volume_snapshot_id` (optional): Restore from snapshot
-- `snapshot_schedule_interval_hours` (optional): Default `24`
-- `snapshot_schedule_time` (optional): Required if interval is 24h, format `HH:MM`
-- `snapshot_retention_days` (optional): Default `30`, must be `>= 1`
+<!-- snapshot configuration options retired; backups now use S3 bucket -->
+<!-- keep here for historical reference but they are ignored by the stack -->
 
 ## Code Conventions & Patterns
 

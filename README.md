@@ -110,9 +110,6 @@ Pulumi config values for `ec2-spot` stack (`availability_zone` is required; othe
 ```bash
 pulumi config set data_volume_size_gib 20
 pulumi config set data_device_name /dev/sdf
-pulumi config set data_volume_snapshot_id snap-0123456789abcdef0
-pulumi config set snapshot_schedule_interval_hours 24
-pulumi config set snapshot_retention_days 30
 pulumi config set availability_zone me-central-1a
 ```
 
@@ -126,10 +123,9 @@ make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium" REGION=me-central-1
 - Encryption uses the account's default AWS-managed EBS KMS key (no customer-managed key configured in this stack).
 - Cloud-init mounts the data disk at `/opt/openclaw` in `bootcmd` before deferred file writes.
 - Attachment name (`/dev/sdf`) is an EC2 mapping hint; on Nitro instances the OS device often appears as `/dev/nvme*`.
-- The data volume is tagged for DLM-managed scheduled snapshots with retention controls.
-- `pulumi destroy` deletes the data volume; recovery is snapshot-first (restore via `data_volume_snapshot_id`).
+- The data volume is tagged for identification; actual backups happen via S3 sync.
+- `pulumi destroy` deletes the data volume; recovery is performed by restoring from the S3 bucket.
 - AZ selection is deterministic and required (`availability_zone`).
-- Snapshot restore guardrail: snapshot `OpenClawAz` tag must match configured `availability_zone`.
 
 You can inspect all available commands with:
 
