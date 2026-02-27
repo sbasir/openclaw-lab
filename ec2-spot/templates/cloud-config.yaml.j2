@@ -17,13 +17,13 @@ write_files:
       {{ openclaw_service | indent(width=6) }}
 
   - path: /var/log/openclaw-s3-restore.log
-    owner: ec2-user:ec2-user
+    owner: root:root
     permissions: '0644'
     content: |
       
 
   - path: /var/log/openclaw-s3-backup.log
-    owner: ec2-user:ec2-user
+    owner: root:root
     permissions: '0644'
     content: |
       
@@ -44,6 +44,13 @@ write_files:
       {
         echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
         aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION"
+        chown -R ec2-user:ec2-user "$OPENCLAW_HOME/.openclaw"
+        restored_files_count="$(find "$OPENCLAW_HOME/.openclaw" -mindepth 1 -type f | wc -l || true)"
+        if [ "${restored_files_count:-0}" -eq 0 ]; then
+          echo "$(date -Iseconds) Restore completed, but no files were found in s3://$BACKUP_BUCKET (bucket may be empty, e.g., on first deployment)"
+        else
+          echo "$(date -Iseconds) Restore complete; restored ${restored_files_count} file(s) from s3://$BACKUP_BUCKET"
+        fi
         echo "$(date -Iseconds) Restore complete"
       } >> "$LOG_FILE" 2>&1
 
@@ -89,6 +96,7 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+      RemainAfterExit=yes
 
   - path: /etc/systemd/system/openclaw-s3-backup.service
     owner: root:root
@@ -197,16 +205,16 @@ runcmd:
 
   # Download bootstrap scripts from S3 (keeps cloud-config under 16KB limit)
   - |
-    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" /opt/openclaw/auto-approve-devices.sh
-    chmod 755 /opt/openclaw/auto-approve-devices.sh
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" /opt/openclaw/auto-approve-devices.sh || { echo "Failed to download auto-approve-devices.sh from s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" >&2; exit 1; }
+    chmod 755 /opt/openclaw/auto-approve-devices.sh  
     chown ec2-user:ec2-user /opt/openclaw/auto-approve-devices.sh
 
   - |
-    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" /opt/aws/amazon-cloudwatch-agent/etc/config.json
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" /opt/aws/amazon-cloudwatch-agent/etc/config.json || { echo "Failed to download cloudwatch-agent-config.json from s3://{{ s3_scripts_bucket_name }}/cloudwatch-agent-config.json" >&2; exit 1; }  
     chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/config.json
 
   - |
-    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" /opt/openclaw/docker-compose.yaml
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" /opt/openclaw/docker-compose.yaml || { echo "Failed to download docker-compose.yaml from s3://{{ s3_scripts_bucket_name }}/docker-compose.yaml" >&2; exit 1; } 
     chmod 644 /opt/openclaw/docker-compose.yaml
     chown ec2-user:ec2-user /opt/openclaw/docker-compose.yaml
 
