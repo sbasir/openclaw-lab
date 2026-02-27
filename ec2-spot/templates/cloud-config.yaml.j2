@@ -43,7 +43,7 @@ write_files:
       mkdir -p "$OPENCLAW_HOME/.openclaw"
       {
         echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
-        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION"
+        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION" --delete
         chown -R ec2-user:ec2-user "$OPENCLAW_HOME/.openclaw"
         restored_files_count="$(find "$OPENCLAW_HOME/.openclaw" -mindepth 1 -type f | wc -l || true)"
         if [ "${restored_files_count:-0}" -eq 0 ]; then
