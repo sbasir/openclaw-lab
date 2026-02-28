@@ -39,13 +39,41 @@ make install
 
 2. Configure required values:
 
-- In `platform` stack config, set `github_repo` (for example: `sbasir/openclaw-lab`)
 - Configure AWS region and credentials in your environment
+- Login in to Pulumi and select your organization and project
 
 3. Deploy platform resources first:
 
+- In `platform` stack config, set `github_repo` (for example: `sbasir/openclaw-lab`)
+```
+cd platform
+pulumi config set github_repo your_github_username/your_repo_name
+```
+
+Deploy platform resources (OIDC role, ECR repository, S3 buckets etc):
 ```bash
 make platform-up
+```
+
+From this step onward, you can run some steps using Github Actions workflows instead of locally if you prefer (see CI/CD workflows below).
+
+4. Build and push the OpenClaw Docker image to ECR:
+
+> A docker engine is required locally to build the image locally, or you can trigger the GitHub Actions workflow `Build and Push OpenClaw Docker Image` which performs the same steps in a GitHub-hosted runner with docker support.
+
+```bash
+make gh-act-build-push-openclaw-image
+```
+
+5. Store your `.env` secrets in SSM Parameter Store:
+
+```bash
+cp ec2-spot/templates/dotenv.example .env
+
+sed -i "s|<ECR_REPOSITORY_URL>|$(make platform-output-json | jq -r '.ecr_repository_url')|g" .env
+sed -i "s|<OPENCLAW_GATEWAY_TOKEN>|$(openssl rand -hex 32)|g" .env
+
+make openclaw-dotenv-put-parameter
 ```
 
 4. Deploy spot infrastructure:
@@ -60,6 +88,110 @@ make ec2-spot-up
 make platform-output
 make ec2-spot-output
 ```
+
+6. Monitor bootstrap logs:
+
+```bash
+make ec2-spot-deploy-logs
+```
+
+7. Port forwarding for local access to the OpenClaw gateway:
+
+```bash
+make openclaw-gateway-port-forward
+```
+
+8. Access the OpenClaw gateway at `http://localhost:18789`
+
+## Login to Github Copilot
+
+To enable GitHub Copilot for this repository, you can follow these steps:
+```
+make openclaw-cli COMMANDS="models auth login-github-copilot"
+◇  Authorize ──────────────────────────────╮
+│                                          │
+│  Visit: https://github.com/login/device  │
+│  Code: FC97-1D29                         │
+│                                          │
+├──────────────────────────────────────────╯
+```
+Manually navigate to the provided URL, enter the code, and complete the authentication process. This will allow you to use GitHub Copilot's AI-powered code suggestions while working on this repository.
+
+## Set model
+
+In command mode, you can set the model for your session using:
+
+```
+make openclaw-cli COMMAND="models set github-copilot/gpt-4o"
+```
+
+or in the browser chat interface, you can use the command:
+
+```
+/models github-copilot
+github-copilot/claude-haiku-4.5
+github-copilot/claude-opus-4.5
+github-copilot/claude-opus-4.6
+github-copilot/claude-sonnet-4
+github-copilot/claude-sonnet-4.5
+github-copilot/claude-sonnet-4.6
+github-copilot/gemini-2.5-pro
+github-copilot/gemini-3-flash-preview
+github-copilot/gemini-3-pro-preview
+github-copilot/gemini-3.1-pro-preview
+github-copilot/gpt-4.1
+github-copilot/gpt-4o
+github-copilot/gpt-5
+github-copilot/gpt-5-mini
+github-copilot/gpt-5.1
+github-copilot/gpt-5.1-codex
+github-copilot/gpt-5.1-codex-max
+github-copilot/gpt-5.1-codex-mini
+github-copilot/gpt-5.2
+github-copilot/gpt-5.2-codex
+github-copilot/grok-code-fast-1
+
+/model github-copilot/gpt-4o
+```
+You can also configure in http://localhost:18789/agents once the first model is set.
+
+## Adding Slack Integration
+
+To integrate Slack with OpenClaw, you can follow the documentation for setting up Slack channels and configuring the gateway to send notifications to Slack. This typically involves creating a Slack app, obtaining the necessary credentials (like a webhook URL or bot token), and then updating the OpenClaw gateway configuration to use these credentials for sending messages.
+
+Basically add to the gateway configuration (i.e. `/opt/openclaw/.openclaw/openclaw.json` on the EC2 instance) the relevant Slack integration settings as per the documentation, set it directly in raw mode using the browser interface http://localhost:18789/config
+
+
+```jsonc
+{
+  channels: {
+    slack: {
+      enabled: true,
+      mode: "socket",
+      appToken: "xapp-...",
+      botToken: "xoxb-...",
+    },
+  },
+}
+```
+
+For detailed instructions, refer to the official OpenClaw documentation on Slack integration:
+https://docs.openclaw.ai/channels/slack#slack
+https://docs.openclaw.ai/gateway/configuration-reference#slack
+
+If everything is set up correctly, you should see a pairing notification in your Slack workspace on the first chat to the bot like:
+```
+OpenClaw: access not configured.
+
+Your Slack user id: U0000AAAA
+
+Pairing code: XXXXXX
+
+Ask the bot owner to approve with:
+openclaw pairing approve slack XXXXXX
+```
+
+You can run `make openclaw-cli COMMAND="pairing approve slack XXXXXX"` to approve the pairing and complete the integration.
 
 ## Development Commands
 

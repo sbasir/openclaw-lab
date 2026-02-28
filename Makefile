@@ -133,7 +133,7 @@ ci: install lint mypy format test ## Setup: Run CI checks (lint, mypy, format, t
 
 ##@ Infra Commands
 
-.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-deploy-logs platform-preview platform-up platform-destroy platform-output
+.PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-output-json ec2-spot-deploy-logs platform-preview platform-up platform-destroy platform-output platform-output-json
 
 ec2-spot-preview: ## Infra: EC2 Spot Instance - Preview changes
 	@echo "$(GREEN)Previewing EC2 Spot Instance deployment...$(NC)"
@@ -150,6 +150,10 @@ ec2-spot-destroy: ## Infra: EC2 Spot Instance - Destroy infrastructure
 ec2-spot-output: ## Infra: EC2 Spot Instance - Show stack output
 	@cd ec2-spot && \
 	$(PULUMI) stack output
+
+ec2-spot-output-json: ## Infra: EC2 Spot Instance - Show stack output in JSON format
+	@cd ec2-spot && \
+	$(PULUMI) stack output --json
 
 ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via SSM Session Manager
 	@echo "📊 Monitoring bootstrap progress:"
@@ -172,6 +176,10 @@ platform-destroy: ## Infra: Platform (OIDC, ECR) - Destroy infrastructure
 platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
 	@cd platform && \
 	$(PULUMI) stack output
+
+platform-output-json: ## Infra: Platform (OIDC, ECR) - Show stack output in JSON format
+	@cd platform && \
+	$(PULUMI) stack output --json
 
 ##@ GitHub Actions Commands
 
@@ -209,7 +217,7 @@ gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Doc
 
 ##@ Helpful Commands
 
-.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter aws-ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
+.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-port-forward openclaw-dotenv-put-parameter aws-ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
 
 aws-ec2-spot-prices: ## Helpful: Show recent spot prices (e.g. make aws-ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium")
 	@echo "$(GREEN)Fetching recent EC2 Spot prices for region '$(REGION)' and instance types: $(INSTANCE_TYPES)...$(NC)"
@@ -222,7 +230,7 @@ openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session M
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --region $(REGION)
 
-openclaw-gateway-session: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+openclaw-gateway-port-forward: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
 	@cd ec2-spot && \
 	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
