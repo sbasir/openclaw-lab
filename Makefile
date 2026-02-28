@@ -209,11 +209,11 @@ gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Doc
 
 ##@ Helpful Commands
 
-.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
+.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-session openclaw-dotenv-put-parameter aws-ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
 
-ec2-spot-prices: ## Helpful: Show recent spot prices (e.g. make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium")
+aws-ec2-spot-prices: ## Helpful: Show recent spot prices (e.g. make aws-ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium")
 	@echo "$(GREEN)Fetching recent EC2 Spot prices for region '$(REGION)' and instance types: $(INSTANCE_TYPES)...$(NC)"
-	@echo "$(YELLOW)Modify with REGION and INSTANCE_TYPES (e.g. make ec2-spot-prices REGION=us-east-1 INSTANCE_TYPES=\"t4g.small t4g.medium\")$(NC)"
+	@echo "$(YELLOW)Modify with REGION and INSTANCE_TYPES (e.g. make aws-ec2-spot-prices REGION=us-east-1 INSTANCE_TYPES=\"t4g.small t4g.medium\")$(NC)"
 	@AWS="$(AWS)" bash scripts/ec2-spot-prices.sh --region "$(REGION)" --instance-types "$(INSTANCE_TYPES)"
 
 openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session Manager
@@ -228,6 +228,14 @@ openclaw-gateway-session: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot In
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"], "localPortNumber":["18789"]}' --region $(REGION)
 
+openclaw-gateway-logs: ## Helpful: View OpenClaw Gateway logs on EC2 Spot Instance via SSM Session Manager
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --region $(REGION) \
+	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml logs --follow openclaw-gateway\""]' \
+
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
 openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
 	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
 
@@ -251,7 +259,7 @@ openclaw-devices-approve-all: ## Helpful: Auto-approve all pending OpenClaw devi
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw']" --region $(REGION)
 
-openclaw-dashboard: ## Helpful: Open CloudWatch Dashboard in browser
+openclaw-cloudwatch-dashboard: ## Helpful: Open CloudWatch Dashboard in browser
 	@cd ec2-spot && \
 	dashboard_url=$$($(PULUMI) stack output dashboard_url) && \
 	if [ -z "$$dashboard_url" ]; then echo "No dashboard_url in stack outputs. Deploy the stack first."; exit 1; fi; \
