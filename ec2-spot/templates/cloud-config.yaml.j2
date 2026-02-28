@@ -28,55 +28,6 @@ write_files:
     content: |
       
 
-  - path: /usr/local/bin/openclaw-s3-restore.sh
-    owner: root:root
-    permissions: '0755'
-    defer: true
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      OPENCLAW_HOME="/opt/openclaw"
-      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
-      AWS_REGION="{{ aws_region }}"
-      LOG_FILE="/var/log/openclaw-s3-restore.log"
-
-      mkdir -p "$OPENCLAW_HOME/.openclaw"
-      {
-        echo "$(date -Iseconds) Starting restore from s3://$BACKUP_BUCKET"
-        aws s3 sync "s3://$BACKUP_BUCKET/" "$OPENCLAW_HOME/.openclaw/" --region "$AWS_REGION" --delete
-        chown -R ec2-user:ec2-user "$OPENCLAW_HOME/.openclaw"
-        restored_files_count="$(find "$OPENCLAW_HOME/.openclaw" -mindepth 1 -type f | wc -l || true)"
-        if [ "${restored_files_count:-0}" -eq 0 ]; then
-          echo "$(date -Iseconds) Restore completed, but no files were found in s3://$BACKUP_BUCKET (bucket may be empty, e.g., on first deployment)"
-        else
-          echo "$(date -Iseconds) Restore complete; restored ${restored_files_count} file(s) from s3://$BACKUP_BUCKET"
-        fi
-        echo "$(date -Iseconds) Restore complete"
-      } >> "$LOG_FILE" 2>&1
-
-  - path: /usr/local/bin/openclaw-s3-backup.sh
-    owner: root:root
-    permissions: '0755'
-    defer: true
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      OPENCLAW_HOME="/opt/openclaw"
-      BACKUP_BUCKET="{{ s3_backup_bucket_name }}"
-      AWS_REGION="{{ aws_region }}"
-      LOG_FILE="/var/log/openclaw-s3-backup.log"
-
-      if [ ! -d "$OPENCLAW_HOME/.openclaw" ]; then
-        echo "$(date -Iseconds) ERROR: $OPENCLAW_HOME/.openclaw does not exist" >> "$LOG_FILE" 2>&1
-        exit 1
-      fi
-
-      {
-        echo "$(date -Iseconds) Starting backup to s3://$BACKUP_BUCKET"
-        aws s3 sync "$OPENCLAW_HOME/.openclaw/" "s3://$BACKUP_BUCKET/" --region "$AWS_REGION"
-        echo "$(date -Iseconds) Backup complete"
-      } >> "$LOG_FILE" 2>&1
-
   - path: /etc/systemd/system/openclaw-s3-restore.service
     owner: root:root
     permissions: '0644'
@@ -91,7 +42,7 @@ write_files:
       [Service]
       Type=oneshot
       User=root
-      ExecStart=/usr/local/bin/openclaw-s3-restore.sh
+      ExecStart=/usr/local/bin/openclaw-s3-restore.sh {{ s3_backup_bucket_name }} {{ aws_region }}
       SyslogIdentifier=openclaw-s3-restore
 
       [Install]
@@ -105,13 +56,18 @@ write_files:
     content: |
       [Unit]
       Description=OpenClaw backup to S3
-      After=network-online.target openclaw-s3-restore.service
+      After=network-online.target openclaw-s3-restore.service openclaw.service
       Wants=network-online.target
+      PartOf=openclaw.service
+      # PartOf ensures backup only runs when OpenClaw service is active.
+      # This provides basic consistency protection by preventing backups
+      # while the service is stopped or restarting. For additional safety
+      # in high-write scenarios, consider adding explicit file locks.
 
       [Service]
       Type=oneshot
       User=root
-      ExecStart=/usr/local/bin/openclaw-s3-backup.sh
+      ExecStart=/usr/local/bin/openclaw-s3-backup.sh {{ s3_backup_bucket_name }} {{ aws_region }}
       SyslogIdentifier=openclaw-s3-backup
 
       [Install]
@@ -129,6 +85,50 @@ write_files:
       [Timer]
       OnBootSec=5min
       OnUnitActiveSec=20min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /var/log/openclaw-s3-lifecycle.log
+    owner: root:root
+    permissions: '0644'
+    content: |
+      
+
+  - path: /etc/systemd/system/openclaw-s3-lifecycle.service
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=OpenClaw S3 snapshot lifecycle management
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User=root
+      ExecStart=/usr/local/bin/openclaw-s3-lifecycle.py --bucket {{ s3_backup_bucket_name }} --region {{ aws_region }}
+      StandardOutput=append:/var/log/openclaw-s3-lifecycle.log
+      StandardError=append:/var/log/openclaw-s3-lifecycle.log
+      SyslogIdentifier=openclaw-s3-lifecycle
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/openclaw-s3-lifecycle.timer
+    owner: root:root
+    permissions: '0644'
+    defer: true
+    content: |
+      [Unit]
+      Description=Run OpenClaw S3 snapshot lifecycle policy hourly
+      Requires=openclaw-s3-lifecycle.service
+
+      [Timer]
+      OnBootSec=10min
+      OnCalendar=hourly
       Persistent=true
 
       [Install]
@@ -185,25 +185,22 @@ runcmd:
     mkdir -p "$OPENCLAW_HOME/.openclaw/workspace"
     chmod 700 "$OPENCLAW_HOME/.openclaw"
     chmod 700 "$OPENCLAW_HOME/.openclaw/workspace"
-    if [ ! -f "$OPENCLAW_HOME/.openclaw/openclaw.json" ]; then
-    cat > "$OPENCLAW_HOME/.openclaw/openclaw.json" <<-EOF
-    {
-      "gateway": {
-        "controlUi": {
-          "allowedOrigins": [
-            "http://localhost:18789",
-            "http://127.0.0.1:18789"
-          ]
-        }
-      }
-    }
-    EOF
-    fi
-    chown -R ec2-user:ec2-user "$OPENCLAW_HOME"
 
   - ln -sf /run/openclaw/.env /opt/openclaw/.env
 
   # Download bootstrap scripts from S3 (keeps cloud-config under 16KB limit)
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/openclaw-s3-restore.sh" /usr/local/bin/openclaw-s3-restore.sh || { echo "Failed to download openclaw-s3-restore.sh from s3://{{ s3_scripts_bucket_name }}/openclaw-s3-restore.sh" >&2; exit 1; }
+    chmod 755 /usr/local/bin/openclaw-s3-restore.sh
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/openclaw-s3-backup.sh" /usr/local/bin/openclaw-s3-backup.sh || { echo "Failed to download openclaw-s3-backup.sh from s3://{{ s3_scripts_bucket_name }}/openclaw-s3-backup.sh" >&2; exit 1; }
+    chmod 755 /usr/local/bin/openclaw-s3-backup.sh
+
+  - |
+    aws s3 cp "s3://{{ s3_scripts_bucket_name }}/s3_snapshot_lifecycle.py" /usr/local/bin/openclaw-s3-lifecycle.py || { echo "Failed to download s3_snapshot_lifecycle.py from s3://{{ s3_scripts_bucket_name }}/s3_snapshot_lifecycle.py" >&2; exit 1; }
+    chmod 755 /usr/local/bin/openclaw-s3-lifecycle.py
+
   - |
     aws s3 cp "s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" /opt/openclaw/auto-approve-devices.sh || { echo "Failed to download auto-approve-devices.sh from s3://{{ s3_scripts_bucket_name }}/auto-approve-devices.sh" >&2; exit 1; }
     chmod 755 /opt/openclaw/auto-approve-devices.sh  
@@ -226,6 +223,8 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable openclaw-s3-backup.timer
   - systemctl start openclaw-s3-backup.timer
+  - systemctl enable openclaw-s3-lifecycle.timer
+  - systemctl start openclaw-s3-lifecycle.timer
   - systemctl enable openclaw.service
   - systemctl start openclaw.service
 

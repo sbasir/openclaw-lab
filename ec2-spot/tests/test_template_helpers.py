@@ -23,6 +23,9 @@ def test_render_template_renders_cloud_config_with_context_values() -> None:
     assert "compose/releases/download/v9.9.9/docker-compose-linux-" in rendered
     assert "s3://openclaw-scripts-test/" in rendered
     assert "Description=Demo Service" in rendered
+    # lifecycle timer should run hourly (not daily) now that the service is
+    # executed more frequently
+    assert "OnCalendar=hourly" in rendered
 
 
 def test_render_template_raises_for_missing_required_context_variable() -> None:

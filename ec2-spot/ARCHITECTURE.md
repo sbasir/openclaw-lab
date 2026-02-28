@@ -11,10 +11,112 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack.
   - `auto-approve-devices.sh` helper script
 - Runtime secrets are generated at service start under `/run/openclaw/.env`.
 - CloudWatch agent is installed and configured for log collection and metrics monitoring.
-- S3 sync backup/restore keeps `/opt/openclaw/.openclaw` mirrored in a platform-managed bucket.
-  - Boot restore runs before `openclaw.service` starts.
-  - A systemd timer syncs back to S3 every 20 minutes.
+- S3 snapshot-based backup/restore keeps `/opt/openclaw/.openclaw` mirrored in a platform-managed bucket.
+  - Boot restore runs from `s3://bucket/latest/` before `openclaw.service` starts.
+  - A systemd timer creates timestamped snapshots and updates `latest/` every 20 minutes.
+  - Lifecycle policy runs hourly to enforce tiered retention rules.
   - Backup/restore logs are collected in CloudWatch Logs.
+- **Bootstrap scripts** (backup/restore/lifecycle/auto-approve/docker-compose/cloudwatch config) are uploaded automatically by the **platform** Pulumi stack into the scripts bucket and fetched during cloud-init; no manual S3 uploads are required.
+
+## S3 Snapshot-Based Backups & Lifecycle Management
+
+### Snapshot Structure
+
+The S3 backup bucket uses a snapshot-based architecture for atomic point-in-time recovery:
+
+```
+s3://openclaw-lab-backup-<stack>-<account-id>/
+├── latest/                     # Always contains most recent backup (fast boot restore)
+│   └── .openclaw/*
+└── snapshots/
+    ├── 2026-02-27-14-00/      # Timestamped snapshots (YYYY-MM-DD-HH-MM UTC)
+    │   └── .openclaw/*
+    ├── 2026-02-27-13-00/
+    │   └── .openclaw/*
+    └── 2026-02-26-14-00/
+        └── .openclaw/*
+```
+
+**Benefits over S3 versioning:**
+- **Atomic snapshots**: All files captured together at a specific timestamp
+- **Simple restoration**: Copy entire snapshot folder → instant state recovery
+- **Clear retention**: Delete entire snapshots older than policy allows
+- **Lower cost**: Only keep full snapshots, not per-file version history
+
+### Backup Frequency
+
+Backups run every **20 minutes** via systemd timer (`openclaw-s3-backup.timer`):
+1. Create timestamped snapshot: `s3://bucket/snapshots/YYYY-MM-DD-HH-MM/`
+2. Update `latest/`: Sync current state to `s3://bucket/latest/` (with `--delete`)
+
+### Tiered Retention Policy
+
+Automated lifecycle management runs **hourly** via systemd timer (`openclaw-s3-lifecycle.timer`):
+
+| Age Range | Retention Rule | Example |
+|-----------|----------------|---------|
+| **< 24 hours** | Keep one snapshot per hour (earliest) | One snapshot for each hour |
+| **24h - 7 days** | Keep only 00:00 UTC daily snapshots | One snapshot per day at midnight |
+| **7 days - 30 days** | Keep only Friday 00:00 UTC snapshots | One snapshot per week (Friday) |
+| **> 30 days** | Delete all snapshots | Expire old backups |
+| **`latest/`** | Always preserved | Never deleted by lifecycle policy |
+
+**Implementation**: Pure Python script with boto3 (`/usr/local/bin/openclaw-s3-lifecycle.py`)
+- Testable logic separated from AWS API calls
+- Unit tests verify retention calculations
+- Runs at boot + daily + on-demand
+
+### Restore Scenarios
+
+**1. Normal boot (automatic):**
+```bash
+# Happens automatically via cloud-init
+# Restores from s3://bucket/latest/
+```
+
+**2. Restore from specific snapshot:**
+```bash
+# SSH into instance
+sudo aws s3 sync s3://openclaw-lab-backup-dev-123456/snapshots/2026-02-27-11-00/ \
+  /opt/openclaw/.openclaw/ --region us-east-1 --delete
+
+# Restart OpenClaw service
+sudo systemctl restart openclaw.service
+```
+
+**3. List available snapshots:**
+```bash
+aws s3 ls s3://openclaw-lab-backup-dev-123456/snapshots/ --recursive --region us-east-1
+```
+
+**4. Manual lifecycle policy run:**
+```bash
+# Dry run (see what would be deleted)
+sudo /usr/local/bin/openclaw-s3-lifecycle.py \
+  --bucket openclaw-lab-backup-dev-123456 \
+  --region us-east-1 \
+  --dry-run
+
+# Actual run (delete expired snapshots)
+sudo /usr/local/bin/openclaw-s3-lifecycle.py \
+  --bucket openclaw-lab-backup-dev-123456 \
+  --region us-east-1
+```
+
+### Consistency Guard (Systemd Ordering)
+
+The backup service uses systemd dependencies to ensure basic consistency:
+
+- `After=openclaw.service`: Backup doesn't run until OpenClaw service is started
+- `PartOf=openclaw.service`: Backup service is stopped if OpenClaw service is stopped/restarted
+- **Result**: Backups only occur when the OpenClaw service is actively running
+
+**Limitations:**
+- This approach does **not** prevent concurrent writes during the 20-minute backup cycle
+- OpenClaw's internal file consistency mechanisms are relied upon for data integrity
+- For high-write workloads or strict consistency requirements, consider adding explicit file locks (not yet implemented)
+
+**Future enhancement**: Implement `.openclaw/.sync-in-progress` lock file or brief service pause during backup.
 
 ## Data vs Secret persistence boundary
 

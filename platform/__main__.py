@@ -312,6 +312,8 @@ s3_platform_policy = aws.iam.RolePolicy(
                         "s3:PutObject",
                         "s3:GetObject",
                         "s3:DeleteObject",
+                        "s3:GetObjectTagging",
+                        "s3:PutObjectTagging",
                     ],
                     "Resource": [
                         "arn:aws:s3:::openclaw-lab-backup-*",
@@ -477,6 +479,33 @@ aws.s3.BucketObject(
     key="cloudwatch-agent-config.json",
     content=load_ec2_spot_template("cloudwatch-agent-config.json"),
     content_type="application/json",
+)
+
+# Upload backup/restore and lifecycle scripts so the ec2-spot stack can simply
+# download them during bootstrap.  This keeps all IaC assets in Pulumi and
+# ensures scripts stay in sync with repository.
+aws.s3.BucketObject(
+    f"{prefix}-s3-backup-script",
+    bucket=scripts_bucket.id,
+    key="openclaw-s3-backup.sh",
+    content=load_ec2_spot_template("openclaw-s3-backup.sh"),
+    content_type="text/x-sh",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-s3-restore-script",
+    bucket=scripts_bucket.id,
+    key="openclaw-s3-restore.sh",
+    content=load_ec2_spot_template("openclaw-s3-restore.sh"),
+    content_type="text/x-sh",
+)
+
+aws.s3.BucketObject(
+    f"{prefix}-s3-lifecycle-script",
+    bucket=scripts_bucket.id,
+    key="s3_snapshot_lifecycle.py",
+    content=load_ec2_spot_template("s3_snapshot_lifecycle.py"),
+    content_type="text/x-python",
 )
 
 aws.s3.BucketObject(
