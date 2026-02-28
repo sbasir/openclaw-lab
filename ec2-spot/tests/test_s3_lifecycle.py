@@ -1,6 +1,6 @@
 """Tests for S3 snapshot lifecycle management."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import sys
 from pathlib import Path
 
@@ -69,6 +69,21 @@ class TestIsDailySnapshot:
         dt = datetime(2026, 2, 27, 0, 0, 59, tzinfo=timezone.utc)
         assert is_daily_snapshot(dt) is True
 
+    def test_midnight_with_minutes_is_daily(self) -> None:
+        """Test that 00:xx:00 is still a daily snapshot."""
+        dt = datetime(2026, 2, 27, 0, 15, 0, tzinfo=timezone.utc)
+        assert is_daily_snapshot(dt) is True
+
+    def test_midnight_plus_hour_is_not_daily(self) -> None:
+        """Test that 01:00:00 is not a daily snapshot."""
+        dt = datetime(2026, 2, 27, 1, 0, 0, tzinfo=timezone.utc)
+        assert is_daily_snapshot(dt) is False
+
+    def test_midnight_minus_minute_is_not_daily(self) -> None:
+        """Test that 23:59:00 is not a daily snapshot."""
+        dt = datetime(2026, 2, 26, 23, 59, 0, tzinfo=timezone.utc)
+        assert is_daily_snapshot(dt) is False
+
 
 class TestIsFridaySnapshot:
     """Tests for identifying Friday snapshots."""
@@ -95,21 +110,28 @@ class TestIsFridaySnapshot:
 class TestCalculateSnapshotsToKeep:
     """Tests for the snapshot retention policy calculation."""
 
-    def test_keep_all_recent_snapshots(self) -> None:
-        """Test that all snapshots < 24 hours old are kept."""
+    def test_keep_all_recent_hourly_snapshots(self) -> None:
+        """Test that hourly snapshots < 24 hours old are kept."""
         now = datetime(2026, 2, 27, 12, 0, tzinfo=timezone.utc)
 
         # Create snapshots from last 6 hours (hourly)
         snapshots = [
-            f"snapshots/2026-02-27-{hour:02d}-00/"
+            f"snapshots/2026-02-27-{hour:02d}-{minute:02d}/"
             for hour in range(6, 12)  # 06:00 to 11:00
+            for minute in [5, 25, 45]
         ]
 
         to_keep = calculate_snapshots_to_keep(snapshots, now)
 
-        # All should be kept (all < 24h old)
-        assert len(to_keep) == len(snapshots)
-        assert to_keep == set(snapshots)
+        # Only one snapshot per hour should be kept (earliest minute)
+        expected = [
+            f"snapshots/2026-02-27-{hour:02d}-05/"
+            for hour in range(6, 12)  # 06:00 to 11:00
+        ]
+
+        # Only one per hour should be kept (all < 24h old)
+        assert len(to_keep) == len(expected)
+        assert to_keep == set(expected)
 
     def test_daily_retention_24h_to_7d(self) -> None:
         """Test that only 00:00 UTC snapshots are kept in 24h-7d range."""
@@ -285,3 +307,23 @@ class TestCalculateSnapshotsToKeep:
         # At exactly 7d, should transition to Friday-only rule
         # Since it's not Friday, it should NOT be kept
         assert len(to_keep) == 0
+
+    def test_hourly_run_idempotence(self) -> None:
+        """Running the lifecycle policy an hour later should not add back
+        snapshots that were already marked for deletion.
+
+        This guards against bugs when the service is scheduled more frequently
+        than once per day (the hourly timer).  As long as no snapshot ages out of
+        the 24‑hour window between runs, the keep set should remain identical.
+        """
+        base_now = datetime(2026, 2, 27, 12, 0, tzinfo=timezone.utc)
+
+        snapshots = [
+            "snapshots/2026-02-27-10-15/",
+            "snapshots/2026-02-27-11-45/",
+        ]
+
+        keep1 = calculate_snapshots_to_keep(snapshots, base_now)
+        keep2 = calculate_snapshots_to_keep(snapshots, base_now + timedelta(hours=1))
+
+        assert keep1 == keep2

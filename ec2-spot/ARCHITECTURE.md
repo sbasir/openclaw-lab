@@ -14,7 +14,7 @@ This document explains data/secret lifecycle behavior for the `ec2-spot` stack.
 - S3 snapshot-based backup/restore keeps `/opt/openclaw/.openclaw` mirrored in a platform-managed bucket.
   - Boot restore runs from `s3://bucket/latest/` before `openclaw.service` starts.
   - A systemd timer creates timestamped snapshots and updates `latest/` every 20 minutes.
-  - Lifecycle policy runs daily to enforce tiered retention rules.
+  - Lifecycle policy runs hourly to enforce tiered retention rules.
   - Backup/restore logs are collected in CloudWatch Logs.
 - **Bootstrap scripts** (backup/restore/lifecycle/auto-approve/docker-compose/cloudwatch config) are uploaded automatically by the **platform** Pulumi stack into the scripts bucket and fetched during cloud-init; no manual S3 uploads are required.
 
@@ -51,11 +51,11 @@ Backups run every **20 minutes** via systemd timer (`openclaw-s3-backup.timer`):
 
 ### Tiered Retention Policy
 
-Automated lifecycle management runs **daily** via systemd timer (`openclaw-s3-lifecycle.timer`):
+Automated lifecycle management runs **hourly** via systemd timer (`openclaw-s3-lifecycle.timer`):
 
 | Age Range | Retention Rule | Example |
 |-----------|----------------|---------|
-| **< 24 hours** | Keep all hourly snapshots | All snapshots from today |
+| **< 24 hours** | Keep one snapshot per hour (earliest) | One snapshot for each hour |
 | **24h - 7 days** | Keep only 00:00 UTC daily snapshots | One snapshot per day at midnight |
 | **7 days - 30 days** | Keep only Friday 00:00 UTC snapshots | One snapshot per week (Friday) |
 | **> 30 days** | Delete all snapshots | Expire old backups |

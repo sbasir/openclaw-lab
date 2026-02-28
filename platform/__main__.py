@@ -313,7 +313,7 @@ s3_platform_policy = aws.iam.RolePolicy(
                         "s3:GetObject",
                         "s3:DeleteObject",
                         "s3:GetObjectTagging",
-                        "s3:PutObjectTagging"
+                        "s3:PutObjectTagging",
                     ],
                     "Resource": [
                         "arn:aws:s3:::openclaw-lab-backup-*",

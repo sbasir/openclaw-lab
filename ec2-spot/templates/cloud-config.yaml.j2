@@ -123,12 +123,12 @@ write_files:
     defer: true
     content: |
       [Unit]
-      Description=Run OpenClaw S3 snapshot lifecycle policy daily
+      Description=Run OpenClaw S3 snapshot lifecycle policy hourly
       Requires=openclaw-s3-lifecycle.service
 
       [Timer]
       OnBootSec=10min
-      OnCalendar=daily
+      OnCalendar=hourly
       Persistent=true
 
       [Install]

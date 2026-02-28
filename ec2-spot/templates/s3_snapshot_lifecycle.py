@@ -2,9 +2,9 @@
 """S3 Snapshot Lifecycle Management for OpenClaw Lab.
 
 Implements tiered retention policy:
-  - < 24 hours: Keep all hourly snapshots
-  - 24h - 7 days: Keep only 00:00 UTC daily snapshots
-  - 7 days - 30 days: Keep only Friday snapshots
+  - < 24 hours: Keep one snapshot per hour (earliest in each hour)
+  - 24h - 7 days: Keep only UTC midnight snapshots
+  - 7 days - 30 days: Keep only Friday UTC midnight snapshots
   - > 30 days: Delete all snapshots
   - Always preserve: latest/ (never deleted)
 
@@ -50,15 +50,20 @@ def parse_snapshot_timestamp(snapshot_path: str) -> datetime | None:
 
 
 def is_daily_snapshot(snapshot_dt: datetime) -> bool:
-    """Check if snapshot is a daily snapshot (00:00 UTC).
+    """Check if snapshot is a daily snapshot (midnight UTC).
+
+    The policy treats *any* timestamp that occurs during the 00:00 hour as a
+    daily snapshot.  The original implementation required both hour and minute
+    to be zero, which failed when the timestamp included non‑zero minutes or
+    seconds (keyed off tests added via TDD).
 
     Args:
         snapshot_dt: Snapshot datetime
 
     Returns:
-        True if hour and minute are both 00
+        True if the hour is 0 (regardless of minute/second)
     """
-    return snapshot_dt.hour == 0 and snapshot_dt.minute == 0
+    return snapshot_dt.hour == 0
 
 
 def is_friday_snapshot(snapshot_dt: datetime) -> bool:
@@ -79,9 +84,9 @@ def calculate_snapshots_to_keep(
     """Calculate which snapshots should be retained based on retention policy.
 
     Retention policy:
-      - < 24 hours old: Keep all
-      - 24h - 7 days old: Keep only 00:00 UTC daily snapshots
-      - 7 days - 30 days old: Keep only Friday snapshots
+      - < 24 hours old: Keep one snapshot per hour (earliest encountered)
+      - 24h - 7 days old: Keep only UTC midnight snapshots
+      - 7 days - 30 days old: Keep only Friday UTC midnight snapshots
       - > 30 days old: Delete all
 
     Args:
@@ -96,18 +101,36 @@ def calculate_snapshots_to_keep(
 
     to_keep: Set[str] = set()
 
+    # We need deterministic behaviour for the <24h rule: when multiple
+    # snapshots exist in the same hour we only retain the *earliest* one.  To
+    # guarantee that property independent of the input ordering we sort the
+    # snapshot list by datetime (ascending) before applying the policy.
+    entries: list[tuple[datetime, str]] = []
     for path in snapshot_paths:
         snapshot_dt = parse_snapshot_timestamp(path)
         if snapshot_dt is None:
-            # Invalid format - log and skip
             logger.warning(f"Skipping invalid snapshot path: {path}")
             continue
+        entries.append((snapshot_dt, path))
 
+    entries.sort(key=lambda t: t[0])
+
+    seen_hours: set[tuple[int, int, int, int]] = set()
+
+    for snapshot_dt, path in entries:
         age = now - snapshot_dt
 
-        # Rule 1: Keep all snapshots < 24 hours old
+        # Rule 1: < 24 hours old – keep exactly one snapshot per clock hour.
         if age < timedelta(hours=24):
-            to_keep.add(path)
+            hour_key = (
+                snapshot_dt.year,
+                snapshot_dt.month,
+                snapshot_dt.day,
+                snapshot_dt.hour,
+            )
+            if hour_key not in seen_hours:
+                seen_hours.add(hour_key)
+                to_keep.add(path)
             continue
 
         # Rule 2: 24h - 7 days: Keep only 00:00 UTC daily snapshots
