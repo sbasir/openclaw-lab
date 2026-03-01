@@ -70,11 +70,23 @@ jobs:
           registry: ${{ steps.ecr-registry.outputs.registry }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: openclaw
           platforms: linux/arm64
           push: true
-          tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:latest
+          tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:base
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push image (custom)
+        uses: docker/build-push-action@v6
+        with:
+          context: repo
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:custom
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-contexts: |
+            openclaw=docker-image://${{ steps.pulumi.outputs.ecr_repository_url }}:base
