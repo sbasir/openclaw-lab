@@ -224,45 +224,34 @@ ipv6_route = aws.ec2.Route(
     gateway_id=igw.id,
 )
 
-
-def create_public_subnet(
-    az: str, subnet_ipv4_cidr: str, subnet_ipv6_cidr: pulumi.Input[str]
-) -> aws.ec2.Subnet:
-    return aws.ec2.Subnet(
-        f"{prefix}-public-subnet-{az}",
-        vpc_id=vpc.id,
-        cidr_block=subnet_ipv4_cidr,
-        ipv6_cidr_block=subnet_ipv6_cidr,
-        assign_ipv6_address_on_creation=True,
-        availability_zone=az,
-        tags={"Name": f"{prefix}-public-subnet-{az}"},
-    )
-
-
+# Validate the selected availability zone
 azs = aws.get_availability_zones(region=aws_region).names
-
 if availability_zone not in azs:
     raise ValueError(
         f"availability_zone '{availability_zone}' is not in available AZs: {azs}"
     )
 
-selected_az = availability_zone
+pulumi.export("selected_az", availability_zone)
 
+# Create a single subnet in the selected AZ (no need for subnets in unused AZs)
+ipv4_cidrs = ipv4_subnets_cidrs(cidr_block, 1)
+ipv6_cidrs = ipv6_subnets_cidrs(vpc.ipv6_cidr_block, 1)
 
-pulumi.export("selected_az", selected_az)
+subnet = aws.ec2.Subnet(
+    f"{prefix}-public-subnet",
+    vpc_id=vpc.id,
+    cidr_block=ipv4_cidrs[0],
+    ipv6_cidr_block=ipv6_cidrs[0],
+    assign_ipv6_address_on_creation=True,
+    availability_zone=availability_zone,
+    tags={"Name": f"{prefix}-public-subnet-{availability_zone}"},
+)
 
-ipv4_cidrs = ipv4_subnets_cidrs(cidr_block, len(azs))
-ipv6_cidrs = ipv6_subnets_cidrs(vpc.ipv6_cidr_block, len(azs))
-subnets: list[aws.ec2.Subnet] = []
-
-for az, ipv4_cidr, ipv6_cidr in zip(azs, ipv4_cidrs, ipv6_cidrs):
-    subnet = create_public_subnet(az, ipv4_cidr, ipv6_cidr)
-    subnets.append(subnet)
-    aws.ec2.RouteTableAssociation(
-        f"{prefix}-public-subnet-{az}-association",
-        subnet_id=subnet.id,
-        route_table_id=rt.id,
-    )
+aws.ec2.RouteTableAssociation(
+    f"{prefix}-public-subnet-association",
+    subnet_id=subnet.id,
+    route_table_id=rt.id,
+)
 
 # Security group for EC2 instance (no inbound rules; access via SSM only).
 ec2_sg = aws.ec2.SecurityGroup(
@@ -317,8 +306,6 @@ else:
     )
 
 
-subnet_in_selected_az = {az: subnet for az, subnet in zip(azs, subnets)}[selected_az]
-
 # Create the Spot Instance Request with persistent type.
 # Instance will be restarted (not terminated) if interrupted.
 spot = aws.ec2.SpotInstanceRequest(
@@ -327,7 +314,7 @@ spot = aws.ec2.SpotInstanceRequest(
     instance_type=ec2_instance_type,  # ARM-based instance (t4g.small default)
     iam_instance_profile=ec2_instance_profile.name,
     vpc_security_group_ids=[ec2_sg.id],
-    subnet_id=subnet_in_selected_az.id,
+    subnet_id=subnet.id,
     associate_public_ip_address=True,
     ipv6_address_count=1,
     user_data=pulumi.Output.all(
