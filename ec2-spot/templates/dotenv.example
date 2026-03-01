@@ -1,4 +1,4 @@
-OPENCLAW_IMAGE=<ECR_REPOSITORY_URL>:latest
+OPENCLAW_IMAGE=<ECR_REPOSITORY_URL>:custom
 # Example only. Replace with a strong, secret token for production use.
 OPENCLAW_GATEWAY_TOKEN=<OPENCLAW_GATEWAY_TOKEN>
 OPENCLAW_GATEWAY_BIND=lan
