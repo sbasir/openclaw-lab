@@ -217,7 +217,7 @@ gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Doc
 
 ##@ Helpful Commands
 
-.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-port-forward openclaw-dotenv-put-parameter aws-ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
+.PHONY: aws-describe-images openclaw-ec2-connect openclaw-gateway-port-forward openclaw-gateway-connect openclaw-dotenv-put-parameter aws-ec2-spot-prices openclaw-cli openclaw-devices-list openclaw-devices-approve-all
 
 aws-ec2-spot-prices: ## Helpful: Show recent spot prices (e.g. make aws-ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium")
 	@echo "$(GREEN)Fetching recent EC2 Spot prices for region '$(REGION)' and instance types: $(INSTANCE_TYPES)...$(NC)"
@@ -230,7 +230,7 @@ openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session M
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --region $(REGION)
 
-openclaw-gateway-port-forward: ## Helpful: Connect to OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+openclaw-gateway-port-forward: ## Helpful: Port Forward OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
 	@cd ec2-spot && \
 	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
@@ -244,6 +244,14 @@ openclaw-gateway-logs: ## Helpful: View OpenClaw Gateway logs on EC2 Spot Instan
 	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml logs --follow openclaw-gateway\""]' \
 
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
+
+openclaw-gateway-connect: ## Helpful: Connect into OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+	@cd ec2-spot && \
+	id=$$($(PULUMI) stack output instance_id) && \
+	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
+	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --region $(REGION) \
+	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml exec openclaw-gateway bash\""]' \
+
 openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
 	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
 
