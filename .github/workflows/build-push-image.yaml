@@ -76,8 +76,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:base
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
 
       - name: Build and push image (custom)
         uses: docker/build-push-action@v6
@@ -86,7 +86,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:custom
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=custom
+          cache-to: type=gha,mode=max,scope=custom
           build-contexts: |
             openclaw=docker-image://${{ steps.pulumi.outputs.ecr_repository_url }}:base
