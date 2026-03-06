@@ -250,7 +250,7 @@ openclaw-gateway-connect: ## Helpful: Connect into OpenClaw Gateway on EC2 Spot 
 	id=$$($(PULUMI) stack output instance_id) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --region $(REGION) \
-	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml exec openclaw-gateway bash\""]' \
+	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml exec openclaw-gateway bash\""]'
 
 openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS SSM Parameter Store
 	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
