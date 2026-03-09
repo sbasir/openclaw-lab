@@ -50,8 +50,9 @@ cd platform
 pulumi config set github_repo your_github_username/your_repo_name
 ```
 
-Deploy platform resources (OIDC role, ECR repository, S3 buckets etc):
+Deploy platform resources for your target region (OIDC role, ECR repository, S3 buckets etc). Stack names follow the `{env}.{region-alias}` convention — e.g. `dev.uae` for UAE / me-central-1, `dev.mumbai` for Mumbai / ap-south-1:
 ```bash
+pulumi stack select dev.uae   # or dev.mumbai for DR
 make platform-up
 ```
 
@@ -79,6 +80,7 @@ make openclaw-dotenv-put-parameter
 4. Deploy spot infrastructure:
 
 ```bash
+pulumi stack select dev.uae   # or dev.mumbai
 make ec2-spot-up
 ```
 
@@ -265,12 +267,12 @@ make help
 ## CI/CD Workflows
 
 - `CI`: lint and tests for `ec2-spot` and `platform`
-- `Infra Preview`: Pulumi preview on infrastructure changes
-- `Infra Up`: manual deployment of both stacks
-- `Infra Destroy`: manual destruction of spot infrastructure
-- `Build and Push OpenClaw Docker Image`: builds and publishes image to ECR
+- `Infra Preview`: Pulumi preview across **all active stacks** (matrix: `dev.uae`, `dev.mumbai`) on push/PR
+- `Infra Up`: manual deployment — select target stack (`dev.uae` or `dev.mumbai`)
+- `Infra Destroy`: manual destruction of spot infrastructure for a selected stack
+- `Build and Push OpenClaw Docker Image`: builds and publishes image to **all region ECRs** (matrix)
 
-Detailed workflow documentation is in `.github/WORKFLOWS.md`.
+Each infra workflow uses **GitHub Environments** (`uae`, `mumbai`) for region-specific `AWS_ROLE_ARN` and `AWS_REGION`. See `.github/WORKFLOWS.md` for setup and detailed documentation.
 
 ## Security Notes
 - Root EBS volume is encrypted (uses AWS-managed EBS KMS key)
