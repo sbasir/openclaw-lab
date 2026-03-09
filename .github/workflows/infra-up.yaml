@@ -2,6 +2,15 @@ name: Infra Up (EC2 Spot and Platform)
 
 on:
   workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack to deploy"
+        required: true
+        default: dev.uae
+        type: choice
+        options:
+          - dev.uae
+          - dev.mumbai
 
 permissions:
   id-token: write  # Required for AWS OIDC
@@ -9,8 +18,12 @@ permissions:
 
 jobs:
   ec2-spot:
-    name: Deploy EC2 Spot Infrastructure
+    name: Deploy EC2 Spot (${{ inputs.stack }})
     runs-on: ubuntu-latest
+    # Selects the GitHub Environment matching the target region,
+    # which provides the correct AWS_ROLE_ARN and AWS_REGION.
+    # To add a region: update both this expression and the inputs.stack options above.
+    environment: ${{ inputs.stack == 'dev.uae' && 'uae' || 'mumbai' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -29,8 +42,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Configure AWS credentials (local) 
-        if: ${{ env.ACT }} # only run under act 
+      - name: Configure AWS credentials (local)
+        if: ${{ env.ACT }} # only run under act
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -57,15 +70,15 @@ jobs:
         uses: pulumi/actions@v6
         with:
           command: up
-          stack-name: dev
+          stack-name: ${{ inputs.stack }}
           work-dir: ec2-spot
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
 
   platform:
-    name: Deploy Platform Infrastructure
+    name: Deploy Platform (${{ inputs.stack }})
     runs-on: ubuntu-latest
-
+    environment: ${{ inputs.stack == 'dev.uae' && 'uae' || 'mumbai' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -84,8 +97,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Configure AWS credentials (local) 
-        if: ${{ env.ACT }} # only run under act 
+      - name: Configure AWS credentials (local)
+        if: ${{ env.ACT }} # only run under act
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -97,7 +110,7 @@ jobs:
       - name: Cache Pulumi venv
         uses: actions/cache@v5
         with:
-          path: | 
+          path: |
             platform/.venv
             platform/venv
           key: pulumi-venv-${{ runner.os }}-${{ hashFiles('platform/pyproject.toml') }}
@@ -112,7 +125,7 @@ jobs:
         uses: pulumi/actions@v6
         with:
           command: up
-          stack-name: dev
+          stack-name: ${{ inputs.stack }}
           work-dir: platform
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}

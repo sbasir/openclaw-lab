@@ -2,6 +2,15 @@ name: Infra Destroy (EC2 Spot)
 
 on:
   workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack to destroy"
+        required: true
+        default: dev.uae
+        type: choice
+        options:
+          - dev.uae
+          - dev.mumbai
 
 permissions:
   id-token: write  # Required for AWS OIDC
@@ -9,8 +18,11 @@ permissions:
 
 jobs:
   ec2-spot:
-    name: Destroy EC2 Spot Infrastructure Changes
+    name: Destroy EC2 Spot (${{ inputs.stack }})
     runs-on: ubuntu-latest
+    # Selects the GitHub Environment matching the target region.
+    # To add a region: update both this expression and the inputs.stack options above.
+    environment: ${{ inputs.stack == 'dev.uae' && 'uae' || 'mumbai' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -29,8 +41,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Configure AWS credentials (local) 
-        if: ${{ env.ACT }} # only run under act 
+      - name: Configure AWS credentials (local)
+        if: ${{ env.ACT }} # only run under act
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -57,7 +69,7 @@ jobs:
         uses: pulumi/actions@v6
         with:
           command: destroy
-          stack-name: dev
+          stack-name: ${{ inputs.stack }}
           work-dir: ec2-spot
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}

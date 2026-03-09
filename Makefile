@@ -7,7 +7,7 @@ NC     := \033[0m # No Color
 AWS ?= aws
 REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
-STACK ?= dev
+STACK ?= dev.uae
 VENV_DIR ?= .venv
 INSTANCE_TYPES ?= t4g.small t4g.medium m8g.large m8g.medium r7g.medium
 
