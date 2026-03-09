@@ -26,6 +26,8 @@ The S3 backup bucket uses a snapshot-based architecture for atomic point-in-time
 
 ```
 s3://openclaw-lab-backup-<stack>-<account-id>/
+# e.g. s3://openclaw-lab-backup-dev.uae-<account-id>/
+# or  s3://openclaw-lab-backup-dev.mumbai-<account-id>/
 ├── latest/                     # Always contains most recent backup (fast boot restore)
 │   └── .openclaw/*
 └── snapshots/
@@ -77,8 +79,8 @@ Automated lifecycle management runs **hourly** via systemd timer (`openclaw-s3-l
 **2. Restore from specific snapshot:**
 ```bash
 # SSH into instance
-sudo aws s3 sync s3://openclaw-lab-backup-dev-123456/snapshots/2026-02-27-11-00/ \
-  /opt/openclaw/.openclaw/ --region us-east-1 --delete
+sudo aws s3 sync s3://openclaw-lab-backup-dev.uae-<account-id>/snapshots/2026-02-27-11-00/ \
+  /opt/openclaw/.openclaw/ --region me-central-1 --delete
 
 # Restart OpenClaw service
 sudo systemctl restart openclaw.service
@@ -86,21 +88,21 @@ sudo systemctl restart openclaw.service
 
 **3. List available snapshots:**
 ```bash
-aws s3 ls s3://openclaw-lab-backup-dev-123456/snapshots/ --recursive --region us-east-1
+aws s3 ls s3://openclaw-lab-backup-dev.uae-<account-id>/snapshots/ --recursive --region me-central-1
 ```
 
 **4. Manual lifecycle policy run:**
 ```bash
 # Dry run (see what would be deleted)
 sudo /usr/local/bin/openclaw-s3-lifecycle.py \
-  --bucket openclaw-lab-backup-dev-123456 \
-  --region us-east-1 \
+  --bucket openclaw-lab-backup-dev.uae-<account-id> \
+  --region me-central-1 \
   --dry-run
 
 # Actual run (delete expired snapshots)
 sudo /usr/local/bin/openclaw-s3-lifecycle.py \
-  --bucket openclaw-lab-backup-dev-123456 \
-  --region us-east-1
+  --bucket openclaw-lab-backup-dev.uae-<account-id> \
+  --region me-central-1
 ```
 
 ### Consistency Guard (Systemd Ordering)
@@ -217,7 +219,7 @@ perform a selective recovery you can:
 
 ```bash
 # copy objects from your recovery bucket to the active bucket
-aws s3 sync s3://my-archive-bucket/ s3://openclaw-backup-<stack>/ --region me-central-1
+aws s3 sync s3://my-archive-bucket/ s3://openclaw-lab-backup-<stack>/ --region me-central-1
 # then reboot or reprovision the instance
 ```
 

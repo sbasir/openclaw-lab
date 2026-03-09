@@ -1,5 +1,5 @@
 config:
   aws:region: ap-south-1
-  openclaw-lab:availability_zone: ap-south-1a
+  openclaw-lab:availability_zone: ap-south-1c
   openclaw-lab:instance_type: m8g.medium
   openclaw-lab:ami: ami-019c927fb527c7c37

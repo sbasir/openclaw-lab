@@ -30,16 +30,19 @@ This repository includes automated CI/CD workflows for building and deploying Op
 **Runs on:** Changes to `ec2-spot/`, `platform/`, or `.github/workflows/infra-preview.yaml`  
 **Purpose:** Preview infrastructure changes before deployment
 
-**Jobs:**
-- **EC2 Spot Preview:** Shows Pulumi preview for EC2 Spot infrastructure
-- **Platform Preview:** Shows Pulumi preview for Platform infrastructure
+**Jobs:** Matrix strategy — runs both EC2 Spot and Platform previews **for every active stack** in parallel.
 
-Requires secrets:
-- `AWS_ROLE_ARN` - AWS IAM role ARN for OIDC authentication
-- `PULUMI_ACCESS_TOKEN` - Pulumi Cloud access token
+| Matrix entry | Stack | GitHub Environment |
+|---|---|---|
+| EC2 Spot / Platform preview | `dev.uae` | `uae` |
+| EC2 Spot / Platform preview | `dev.mumbai` | `mumbai` |
 
-Requires variables:
-- `AWS_REGION` - AWS region for deployment (e.g., `us-east-1`)
+`fail-fast: false` ensures a downed region doesn't cancel the other.
+
+Each matrix job reads credentials from the matching **GitHub Environment** (see [GitHub Environments](#github-environments)):
+- `secrets.AWS_ROLE_ARN` — region-specific IAM role ARN
+- `vars.AWS_REGION` — region for that environment
+- `secrets.PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token (shared)
 
 **Permissions:**
 - `id-token: write` - Required for AWS OIDC
@@ -48,18 +51,21 @@ Requires variables:
 
 ### 3. Infra Up (`infra-up.yaml`)
 **Triggers:** Manual workflow dispatch  
-**Purpose:** Deploy infrastructure changes to AWS
+**Purpose:** Deploy infrastructure changes to AWS for a selected region
+
+**Input:**
+- `stack` (choice, default `dev.uae`) — the Pulumi stack to deploy. Options: `dev.uae`, `dev.mumbai`
 
 **Jobs:**
-- **EC2 Spot:** Deploys EC2 Spot infrastructure using Pulumi
-- **Platform:** Deploys Platform infrastructure using Pulumi
+- **EC2 Spot:** Deploys EC2 Spot infrastructure for the selected stack
+- **Platform:** Deploys Platform infrastructure for the selected stack
 
-Requires secrets:
-- `AWS_ROLE_ARN` - AWS IAM role ARN for OIDC authentication
-- `PULUMI_ACCESS_TOKEN` - Pulumi Cloud access token
+The GitHub Environment is resolved from the `stack` input (`dev.uae` → `uae`, `dev.mumbai` → `mumbai`), which supplies region-specific `AWS_ROLE_ARN` and `AWS_REGION`.
 
-Requires variables:
-- `AWS_REGION` - AWS region for deployment (e.g., `us-east-1`)
+Requires:
+- `secrets.AWS_ROLE_ARN` — from selected GitHub Environment
+- `secrets.PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token
+- `vars.AWS_REGION` — from selected GitHub Environment
 
 **Permissions:**
 - `id-token: write` - Required for AWS OIDC
@@ -67,16 +73,19 @@ Requires variables:
 
 ### 4. Infra Destroy (`infra-destroy.yaml`)
 **Triggers:** Manual workflow dispatch  
-**Purpose:** Destroy `ec2-spot` infrastructure resources
+**Purpose:** Destroy `ec2-spot` infrastructure for a selected region
 
-⚠️ **Warning:** This will permanently delete `ec2-spot` resources (EC2 instance, networking resources, EIP associations, and attached stack-managed resources). Platform resources are managed separately.
+⚠️ **Warning:** This will permanently delete `ec2-spot` resources (EC2 instance, networking resources, EIP associations, and attached stack-managed resources) for the selected region. Platform resources are managed separately.
 
-Requires secrets:
-- `AWS_ROLE_ARN` - AWS IAM role ARN for OIDC authentication
-- `PULUMI_ACCESS_TOKEN` - Pulumi Cloud access token
+**Input:**
+- `stack` (choice, default `dev.uae`) — the Pulumi stack to destroy. Options: `dev.uae`, `dev.mumbai`
 
-Requires variables:
-- `AWS_REGION` - AWS region for deployment (e.g., `us-east-1`)
+The GitHub Environment is resolved from the `stack` input, same as Infra Up.
+
+Requires:
+- `secrets.AWS_ROLE_ARN` — from selected GitHub Environment
+- `secrets.PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token
+- `vars.AWS_REGION` — from selected GitHub Environment
 
 **Permissions:**
 - `id-token: write` - Required for AWS OIDC
@@ -84,21 +93,25 @@ Requires variables:
 
 ### 5. Build and Push OpenClaw Docker Image (`build-push-image.yaml`)
 **Triggers:** Manual workflow dispatch  
-**Purpose:** Build the OpenClaw Docker image and push to ECR
+**Purpose:** Build the OpenClaw Docker image and push to ECR in all active regions
 
-**Process:**
+**Jobs:** Matrix strategy — one job per active stack, each authenticating to its own region's ECR.
+
+| Matrix entry | Stack | GitHub Environment |
+|---|---|---|
+| Build & push | `dev.uae` | `uae` |
+| Build & push | `dev.mumbai` | `mumbai` |
+
+**Process (per region):**
 1. Checks out this repository and the OpenClaw repository
-2. Retrieves ECR repository URL from the Platform Pulumi stack output
-3. Authenticates to ECR via AWS OIDC
-4. Builds the OpenClaw Docker image for ARM64 architecture
-5. Tags and pushes the image to ECR
+2. Retrieves ECR repository URL from that region's Platform Pulumi stack output
+3. Authenticates to that region's ECR via AWS OIDC
+4. Builds and pushes the ARM64 image to ECR (GHA cache scoped per stack)
 
-Requires secrets:
-- `AWS_ROLE_ARN` - AWS IAM role ARN for OIDC authentication
-- `PULUMI_ACCESS_TOKEN` - Pulumi Cloud access token
-
-Requires variables:
-- `AWS_REGION` - AWS region for deployment (e.g., `us-east-1`)
+Requires (from each GitHub Environment):
+- `secrets.AWS_ROLE_ARN` — region-specific IAM role ARN
+- `secrets.PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token
+- `vars.AWS_REGION` — region for that environment
 
 **Permissions:**
 - `id-token: write` - Required for AWS OIDC
@@ -124,40 +137,59 @@ This role is created in the `platform` Pulumi stack. It allows GitHub Actions to
 There is a chicken and egg problem where the role needs to exist before the workflow can run, but the workflow is needed to create the role. To resolve this, you need to deploy the Platform stack first using the Pulumi CLI:
 1. Set up AWS credentials locally (e.g., via `aws configure` or environment variables)
 2. Install Pulumi CLI and dependencies
-3. Deploy the Platform stack to create the IAM role:
+3. Deploy the Platform stack for each region to create the IAM roles:
    ```bash
-   make platform-up
+   cd platform
+   pulumi stack select dev.uae && pulumi up    # UAE / me-central-1
+   pulumi stack select dev.mumbai && pulumi up # Mumbai / ap-south-1
    ```
 
-### 3. Configure GitHub Secrets and Variables
+### 3. Create GitHub Environments
 
-** Browser **
-Go to repository settings → Secrets and variables → Actions
+Each deployment region requires a dedicated [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) that stores region-specific credentials. Workflows select the correct environment automatically based on the target stack.
 
-** GitHub CLI **
+#### Current Environments
+
+| Environment | Stack | AWS Region |
+|-------------|-------|------------|
+| `uae` | `dev.uae` | `me-central-1` |
+| `mumbai` | `dev.mumbai` | `ap-south-1` |
+
+#### Create Environments via GitHub CLI
+
 ```bash
-# Add secrets
-gh secret set <Secret Name> -r <Repo Org>/<Repo Name> --body "<Secret Value>"
-# Add variables
-gh variable set <Variable Name> -r <Repo Org>/<Repo Name> --body "<Variable Value>"
+# Create 'uae' environment and configure it
+gh api repos/{owner}/{repo}/environments/uae --method PUT --input /dev/null
+gh secret set AWS_ROLE_ARN --env uae --body "<role ARN from: cd platform && pulumi stack select dev.uae && pulumi stack output github_actions_role_arn>"
+gh variable set AWS_REGION --env uae --body "me-central-1"
+
+# Create 'mumbai' environment and configure it
+gh api repos/{owner}/{repo}/environments/mumbai --method PUT --input /dev/null
+gh secret set AWS_ROLE_ARN --env mumbai --body "<role ARN from: cd platform && pulumi stack select dev.mumbai && pulumi stack output github_actions_role_arn>"
+gh variable set AWS_REGION --env mumbai --body "ap-south-1"
 ```
 
-#### Secrets
+Or via **GitHub web interface**: Settings → Environments → New environment → add secrets/variables per environment.
 
-Add the following secrets:
+#### Per-Environment Values
 
-| Secret Name | Description | How to get |
-|-------------|-------------|-----------|
-| `AWS_ROLE_ARN` | IAM role ARN for OIDC | `arn:aws:iam::123456789012:role/github-actions-role` |
-| `PULUMI_ACCESS_TOKEN` | Pulumi Cloud access token | Get from [Pulumi Console](https://app.pulumi.com/account/tokens) |
+| Name | Type | Description | How to get |
+|------|------|-------------|-----------|
+| `AWS_ROLE_ARN` | Secret | IAM role ARN for OIDC | `cd platform && pulumi stack output github_actions_role_arn` |
+| `AWS_REGION` | Variable | AWS region | `me-central-1`, `ap-south-1`, etc. |
 
-#### Variables
+#### Shared (Repository-level)
 
-Add the following repository variables:
+| Name | Type | Description |
+|------|------|-------------|
+| `PULUMI_ACCESS_TOKEN` | Secret | Pulumi Cloud access token — get from [Pulumi Console](https://app.pulumi.com/account/tokens) |
 
-| Variable Name | Description | Example |
-|---------------|-------------|---------|
-| `AWS_REGION` | AWS region for deployment | `us-east-1` |
+#### Adding a New Region
+
+1. Create a new `Pulumi.dev.<alias>.yaml` in both `platform/` and `ec2-spot/` dirs
+2. Add the stack to the workflow matrix in `infra-preview.yaml` and `build-push-image.yaml`, and to the choice options in `infra-up.yaml` / `infra-destroy.yaml`
+3. Deploy the platform stack locally to get the role ARN
+4. Create a new GitHub Environment and populate `AWS_ROLE_ARN` and `AWS_REGION`
 
 ### 4. Initialize Pulumi Stacks
 
@@ -165,11 +197,13 @@ If stacks don't exist, create them:
 
 #### Local
 ```bash
-# Create/deploy ec2-spot stack
-make ec2-spot-up
+# Deploy ec2-spot and platform for UAE
+cd ec2-spot && pulumi stack select dev.uae && pulumi up
+cd ../platform && pulumi stack select dev.uae && pulumi up
 
-# Create/deploy platform stack
-make platform-up
+# Deploy ec2-spot and platform for Mumbai
+cd ec2-spot && pulumi stack select dev.mumbai && pulumi up
+cd ../platform && pulumi stack select dev.mumbai && pulumi up
 ```
 
 ### 5. Configure Environment Protection (Optional but Recommended)
@@ -177,10 +211,9 @@ make platform-up
 For additional security on infrastructure deployments:
 
 1. Go to repository Settings → Environments
-2. Click "New environment" and name it `production`
+2. Select each environment (`uae`, `mumbai`)
 3. Configure protection rules:
    - Required reviewers (recommended: 1+ people)
-   - Wait timer (recommended: 24 hours)
    - Deployment branches (restrict to `main` only)
 
 ## Usage Examples
@@ -214,9 +247,10 @@ make ci
 
 1. Go to Actions → "Infra Up" workflow
 2. Click "Run workflow"
-3. Wait for both EC2 Spot and Platform deployments to complete
-4. Verify resources in AWS Console:
-   - EC2 instances in EC2 dashboard
+3. Select the target stack (`dev.uae` or `dev.mumbai`)
+4. Wait for both EC2 Spot and Platform deployments to complete
+5. Verify resources in AWS Console:
+   - EC2 instances in EC2 dashboard (check the target region)
    - Container image in ECR
    - Application logs in CloudWatch
 
@@ -226,8 +260,9 @@ make ci
 
 1. Go to Actions → "Infra Destroy" workflow
 2. Click "Run workflow"
-3. All EC2 Spot resources will be deleted
-4. Pulumi state will be preserved in Pulumi Cloud
+3. Select the target stack (`dev.uae` or `dev.mumbai`)
+4. All EC2 Spot resources for that region will be deleted
+5. Pulumi state will be preserved in Pulumi Cloud
 
 **Post-destruction:**
 - All EC2 instances will be terminated
@@ -237,14 +272,11 @@ make ci
 
 ### Build and Push Docker Image
 
-1. Ensure the Platform stack is deployed (has ECR repository)
+1. Ensure the Platform stack is deployed in all active regions (has ECR repositories)
 2. Go to Actions → "Build and Push OpenClaw Docker Image" workflow
 3. Click "Run workflow"
-4. Workflow will:
-   - Clone the OpenClaw repository
-   - Build the Docker image for ARM64
-   - Push to ECR
-5. Verify the image in AWS ECR Console
+4. Workflow runs a matrix job per region — builds the ARM64 image and pushes to each region's ECR
+5. Verify the images in AWS ECR Console (check each region)
 
 ### Test Workflows Locally
 
@@ -255,13 +287,13 @@ Test workflows locally before pushing using `act`:
 make gh-act-ci
 
 # Test Infra Preview (requires AWS credentials)
-make gh-act-infra-preview STACK=dev
+make gh-act-infra-preview STACK=dev.uae
 
 # Test Infra Up (requires AWS credentials)
-make gh-act-infra-up STACK=dev
+make gh-act-infra-up STACK=dev.uae
 
 # Test Infra Destroy (requires AWS credentials)
-make gh-act-infra-destroy STACK=dev
+make gh-act-infra-destroy STACK=dev.uae
 ```
 
 ## Security Best Practices
