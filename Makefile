@@ -7,7 +7,7 @@ NC     := \033[0m # No Color
 AWS ?= aws
 REGION ?= $(AWS_REGION)
 PULUMI ?= pulumi
-STACK ?= dev.uae
+STACK ?=
 VENV_DIR ?= .venv
 INSTANCE_TYPES ?= t4g.small t4g.medium m8g.large m8g.medium r7g.medium
 
@@ -21,6 +21,15 @@ ACT_INFRA_FLAGS = -s PULUMI_ACCESS_TOKEN=$(PULUMI_ACCESS_TOKEN) \
 	-s AWS_SESSION_TOKEN=$$AWS_SESSION_TOKEN \
 	--var AWS_REGION=$(AWS_REGION) \
 	--input stack=$(STACK)
+
+define require_stack
+	@if [ -z "$(STACK)" ]; then \
+		echo "$(RED)Error: STACK is required. Specify the target stack:$(NC)"; \
+		echo "  make $@ STACK=dev.uae"; \
+		echo "  make $@ STACK=dev.mumbai"; \
+		exit 1; \
+	fi
+endef
 
 # AUTO_APPROVE controls whether `--yes` is added to Pulumi commands. Set
 # it to `true` or `yes` (case-sensitive) when running in CI or any
@@ -136,50 +145,61 @@ ci: install lint mypy format test ## Setup: Run CI checks (lint, mypy, format, t
 .PHONY: ec2-spot-preview ec2-spot-up ec2-spot-destroy ec2-spot-output ec2-spot-output-json ec2-spot-deploy-logs platform-preview platform-up platform-destroy platform-output platform-output-json
 
 ec2-spot-preview: ## Infra: EC2 Spot Instance - Preview changes
-	@echo "$(GREEN)Previewing EC2 Spot Instance deployment...$(NC)"
-	@cd ec2-spot && $(PULUMI) preview
+	$(call require_stack)
+	@echo "$(GREEN)Previewing EC2 Spot Instance deployment (stack: $(STACK))...$(NC)"
+	@cd ec2-spot && $(PULUMI) preview --stack $(STACK)
 
 ec2-spot-up: ## Infra: EC2 Spot Instance - Deploy infrastructure
-	@echo "$(GREEN)Deploying EC2 Spot Instance infrastructure...$(NC)"
-	@cd ec2-spot && $(PULUMI) up $(APPROVE_FLAGS)
+	$(call require_stack)
+	@echo "$(GREEN)Deploying EC2 Spot Instance infrastructure (stack: $(STACK))...$(NC)"
+	@cd ec2-spot && $(PULUMI) up --stack $(STACK) $(APPROVE_FLAGS)
 
 ec2-spot-destroy: ## Infra: EC2 Spot Instance - Destroy infrastructure
-	@echo "$(GREEN)Destroying EC2 Spot Instance infrastructure...$(NC)"
-	@cd ec2-spot && $(PULUMI) destroy $(APPROVE_FLAGS)
+	$(call require_stack)
+	@echo "$(GREEN)Destroying EC2 Spot Instance infrastructure (stack: $(STACK))...$(NC)"
+	@cd ec2-spot && $(PULUMI) destroy --stack $(STACK) $(APPROVE_FLAGS)
 
 ec2-spot-output: ## Infra: EC2 Spot Instance - Show stack output
+	$(call require_stack)
 	@cd ec2-spot && \
-	$(PULUMI) stack output
+	$(PULUMI) stack output --stack $(STACK)
 
 ec2-spot-output-json: ## Infra: EC2 Spot Instance - Show stack output in JSON format
+	$(call require_stack)
 	@cd ec2-spot && \
-	$(PULUMI) stack output --json
+	$(PULUMI) stack output --stack $(STACK) --json
 
 ec2-spot-deploy-logs: ## Infra: EC2 Spot Instance - Monitor bootstrap logs via SSM Session Manager
+	$(call require_stack)
 	@echo "📊 Monitoring bootstrap progress:"
-	@cd ec2-spot && id=$$($(PULUMI) stack output instance_id 2>/dev/null); \
+	@cd ec2-spot && id=$$($(PULUMI) stack output instance_id --stack $(STACK) 2>/dev/null); \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
 
 platform-preview: ## Infra: Platform (OIDC, ECR) - Preview changes
-	@echo "$(GREEN)Previewing Platform deployment...$(NC)"
-	@cd platform && $(PULUMI) preview
+	$(call require_stack)
+	@echo "$(GREEN)Previewing Platform deployment (stack: $(STACK))...$(NC)"
+	@cd platform && $(PULUMI) preview --stack $(STACK)
 
 platform-up: ## Infra: Platform (OIDC, ECR) - Deploy infrastructure
-	@echo "$(GREEN)Deploying Platform infrastructure...$(NC)"
-	@cd platform && $(PULUMI) up $(APPROVE_FLAGS)
+	$(call require_stack)
+	@echo "$(GREEN)Deploying Platform infrastructure (stack: $(STACK))...$(NC)"
+	@cd platform && $(PULUMI) up --stack $(STACK) $(APPROVE_FLAGS)
 
 platform-destroy: ## Infra: Platform (OIDC, ECR) - Destroy infrastructure
-	@echo "$(GREEN)Destroying Platform infrastructure...$(NC)"
-	@cd platform && $(PULUMI) destroy $(APPROVE_FLAGS)
+	$(call require_stack)
+	@echo "$(GREEN)Destroying Platform infrastructure (stack: $(STACK))...$(NC)"
+	@cd platform && $(PULUMI) destroy --stack $(STACK) $(APPROVE_FLAGS)
 
 platform-output: ## Infra: Platform (OIDC, ECR) - Show stack output
+	$(call require_stack)
 	@cd platform && \
-	$(PULUMI) stack output
+	$(PULUMI) stack output --stack $(STACK)
 
 platform-output-json: ## Infra: Platform (OIDC, ECR) - Show stack output in JSON format
+	$(call require_stack)
 	@cd platform && \
-	$(PULUMI) stack output --json
+	$(PULUMI) stack output --stack $(STACK) --json
 
 ##@ GitHub Actions Commands
 
@@ -201,16 +221,19 @@ gh-act-infra-preview: ## GitHub Actions: Run Infra Preview workflow locally usin
 	@$(ACT) -W .github/workflows/infra-preview.yaml $(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 gh-act-infra-up: ## GitHub Actions: Run Infra Up workflow locally using act
+	$(call require_stack)
 	@$(ACT) workflow_dispatch \
 		-W .github/workflows/infra-up.yaml \
 		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 gh-act-infra-destroy: ## GitHub Actions: Run Infra Destroy workflow locally using act
+	$(call require_stack)
 	@$(ACT) workflow_dispatch \
 		-W .github/workflows/infra-destroy.yaml \
 		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
 
 gh-act-build-push-openclaw-image: ## GitHub Actions: Build and push OpenClaw Docker image to ECR locally using act
+	$(call require_stack)
 	@$(ACT) workflow_dispatch \
 		-W .github/workflows/build-push-image.yaml \
 		$(ACT_FLAGS) $(ACT_INFRA_FLAGS)
@@ -225,20 +248,23 @@ aws-ec2-spot-prices: ## Helpful: Show recent spot prices (e.g. make aws-ec2-spot
 	@AWS="$(AWS)" bash scripts/ec2-spot-prices.sh --region "$(REGION)" --instance-types "$(INSTANCE_TYPES)"
 
 openclaw-ec2-connect: ## Helpful: Connect to EC2 Spot Instance via SSM Session Manager
+	$(call require_stack)
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --region $(REGION)
 
 openclaw-gateway-port-forward: ## Helpful: Port Forward OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+	$(call require_stack)
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"], "localPortNumber":["18789"]}' --region $(REGION)
 
 openclaw-gateway-logs: ## Helpful: View OpenClaw Gateway logs on EC2 Spot Instance via SSM Session Manager
+	$(call require_stack)
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --region $(REGION) \
 	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml logs --follow openclaw-gateway\""]' \
@@ -246,8 +272,9 @@ openclaw-gateway-logs: ## Helpful: View OpenClaw Gateway logs on EC2 Spot Instan
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters 'command=["sudo su -c \"tail -n 50 -f /var/log/cloud-init-output.log\""]' --region $(REGION)
 
 openclaw-gateway-connect: ## Helpful: Connect into OpenClaw Gateway on EC2 Spot Instance via SSM Session Manager
+	$(call require_stack)
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --region $(REGION) \
 	--parameters 'command=["sudo su -c \"docker compose --file /opt/openclaw/docker-compose.yaml exec openclaw-gateway bash\""]'
@@ -256,13 +283,14 @@ openclaw-dotenv-put-parameter: ## Helpful: Store .env contents securely in AWS S
 	@$(AWS) ssm put-parameter --name "/openclaw-lab/dotenv" --value "$$(cat .env)" --type "SecureString" --overwrite --region $(REGION)
 
 openclaw-cli: ## Helpful: Run OpenClaw CLI commands on the EC2 Spot Instance
+	$(call require_stack)
 	@if [ -z "$$COMMAND" ]; then \
 		echo "Usage: make openclaw-cli COMMAND=\"<command>\""; \
 		echo "Example: make openclaw-cli COMMAND=\"devices list\""; \
 		exit 1; \
 	fi
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['cd /opt/openclaw && sudo docker compose run --rm openclaw-cli $$COMMAND']" --region $(REGION)
 
@@ -270,14 +298,16 @@ openclaw-devices-list: ## Helpful: List pending OpenClaw device pairing requests
 	@$(MAKE) openclaw-cli COMMAND="devices list"
 
 openclaw-devices-approve-all: ## Helpful: Auto-approve all pending OpenClaw device pairing requests
+	$(call require_stack)
 	@cd ec2-spot && \
-	id=$$($(PULUMI) stack output instance_id) && \
+	id=$$($(PULUMI) stack output instance_id --stack $(STACK)) && \
 	if [ -z "$$id" ]; then echo "No instance_id in stack outputs. See 'make ec2-spot-output'"; exit 1; fi; \
 	$(AWS) ssm start-session --target $$id --document-name AWS-StartInteractiveCommand --parameters command="['sudo -u ec2-user /opt/openclaw/auto-approve-devices.sh /opt/openclaw']" --region $(REGION)
 
 openclaw-cloudwatch-dashboard: ## Helpful: Open CloudWatch Dashboard in browser
+	$(call require_stack)
 	@cd ec2-spot && \
-	dashboard_url=$$($(PULUMI) stack output dashboard_url) && \
+	dashboard_url=$$($(PULUMI) stack output dashboard_url --stack $(STACK)) && \
 	if [ -z "$$dashboard_url" ]; then echo "No dashboard_url in stack outputs. Deploy the stack first."; exit 1; fi; \
 	echo "Opening dashboard: $$dashboard_url"; \
 	if command -v open >/dev/null 2>&1; then \

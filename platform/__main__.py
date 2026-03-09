@@ -399,14 +399,19 @@ s3_backup_bucket = aws.s3.Bucket(
     f"{prefix}-backup-bucket",
     bucket=s3_backup_bucket_name,
     force_destroy=False,
-    server_side_encryption_configuration={
-        "rule": {
-            "apply_server_side_encryption_by_default": {
-                "sse_algorithm": "AES256",
-            },
-        },
-    },
     tags={"Name": f"{prefix}-backup-bucket"},
+)
+
+aws.s3.BucketServerSideEncryptionConfiguration(
+    f"{prefix}-backup-bucket-sse",
+    bucket=s3_backup_bucket.id,
+    rules=[
+        aws.s3.BucketServerSideEncryptionConfigurationRuleArgs(
+            apply_server_side_encryption_by_default=aws.s3.BucketServerSideEncryptionConfigurationRuleApplyServerSideEncryptionByDefaultArgs(
+                sse_algorithm="AES256",
+            ),
+        )
+    ],
 )
 
 aws.s3.BucketPublicAccessBlock(
@@ -428,10 +433,15 @@ scripts_bucket = aws.s3.Bucket(
     f"{prefix}-scripts-bucket",
     bucket=scripts_bucket_name,
     force_destroy=True,
-    versioning=aws.s3.BucketVersioningArgs(
-        enabled=True,
-    ),
     tags={"Name": f"{prefix}-scripts-bucket"},
+)
+
+aws.s3.BucketVersioning(
+    f"{prefix}-scripts-bucket-versioning",
+    bucket=scripts_bucket.id,
+    versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
+        status="Enabled",
+    ),
 )
 
 aws.s3.BucketServerSideEncryptionConfiguration(
