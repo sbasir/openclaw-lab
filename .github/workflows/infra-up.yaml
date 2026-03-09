@@ -1,4 +1,5 @@
 name: Infra Up (EC2 Spot and Platform)
+run-name: Deploy infrastructure for ${{ inputs.stack }}
 
 on:
   workflow_dispatch:

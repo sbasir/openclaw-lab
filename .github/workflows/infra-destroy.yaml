@@ -1,4 +1,5 @@
 name: Infra Destroy (EC2 Spot)
+run-name: Destroy EC2 Spot infrastructure for ${{ inputs.stack }}
 
 on:
   workflow_dispatch:
