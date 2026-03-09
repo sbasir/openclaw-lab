@@ -10,22 +10,73 @@ OpenClaw Lab is a Pulumi-based Infrastructure-as-Code project that manages OpenC
 
 1. **`platform/`** - Long-lived shared infrastructure:
    - GitHub OIDC provider (account-scoped; skipped if `create_oidc_provider=false`)
-   - ECR repository for OpenClaw Docker image
+   - Private ECR repository for OpenClaw Docker image
    - IAM role for GitHub Actions CI/CD
-   - Outputs: `ecr_repository_url` (consumed by ec2-spot stack)
+   - S3 buckets: one for data backups, one for bootstrap scripts
+   - Outputs: `ecr_repository_url`, `s3_backup_bucket_name`, `s3_scripts_bucket_name` (all consumed by ec2-spot stack)
 
 2. **`ec2-spot/`** - Ephemeral compute (can be destroyed/recreated):
-   - VPC with multi-AZ subnets (IPv4 + IPv6 via calculated CIDR blocks)
-   - Security groups, IAM instance profile, Spot instance
-   - Root EBS volume sized via stack configuration
+   - VPC with a single subnet in the configured AZ (IPv4 + IPv6 via calculated CIDR blocks)
+   - Security groups (SSM-only access, no SSH), IAM instance profile, Spot instance
+   - Root EBS volume sized via stack configuration (encrypted, tagged for DLM)
    - Systemd service for OpenClaw
-   - **Cross-stack reference** to platform stack for ECR URL
+   - CloudWatch dashboard with 20+ widgets
+   - **Cross-stack references** to platform stack for ECR URL, S3 bucket names
 
 **Stack reference pattern** (in `ec2-spot/__main__.py`):
 ```python
 platform_stack = pulumi.StackReference(f"{pulumi.get_organization()}/openclaw-platform/{pulumi.get_stack()}")
 ecr_repository_url = platform_stack.require_output("ecr_repository_url")
+s3_backup_bucket_name = platform_stack.require_output("s3_backup_bucket_name")
+s3_scripts_bucket_name = platform_stack.require_output("s3_scripts_bucket_name")
 ```
+
+Both stacks must use the **same stack name** (e.g., both `dev.uae`). The cross-stack reference uses `pulumi.get_stack()` to resolve the correct platform stack automatically.
+
+## Multi-Region Deployment
+
+Stack naming convention: `{env}.{region-alias}` (e.g. `dev.uae`, `dev.mumbai`).
+
+| Stack | Region | Config file (both dirs) |
+|-------|--------|------------------------|
+| `dev.uae` | me-central-1 | `Pulumi.dev.uae.yaml` |
+| `dev.mumbai` | ap-south-1 | `Pulumi.dev.mumbai.yaml` |
+
+### GitHub Environments
+Each region requires a GitHub Environment (repo Settings → Environments) with:
+- `AWS_ROLE_ARN` — the `github_actions_role_arn` output from that region's platform stack
+- `AWS_REGION` — the AWS region (e.g. `me-central-1`, `ap-south-1`)
+
+Environment names must match what's in the workflow files: `uae`, `mumbai`.
+
+### Bootstrapping a new region
+```bash
+# 1. Deploy platform stack first (locally, using existing role ARN or static creds)
+cd platform && pulumi stack select dev.mumbai && pulumi up
+
+# 2. Get the new region's role ARN
+pulumi stack output github_actions_role_arn
+
+# 3. Create GitHub Environment "mumbai" in repo settings with:
+#    AWS_ROLE_ARN = <output from step 2>
+#    AWS_REGION   = ap-south-1
+
+# 4. Push images to the new ECR
+# (trigger build-push-image workflow, or run locally)
+
+# 5. Deploy ec2-spot stack
+cd ../ec2-spot && pulumi stack select dev.mumbai && pulumi up
+```
+
+### Renaming the existing `dev` stack to `dev.uae`
+The legacy `dev` stack should be renamed when convenient (does not require the region to be online):
+```bash
+cd platform  && pulumi stack rename dev dev.uae
+cd ../ec2-spot && pulumi stack rename dev dev.uae
+```
+After renaming: update the `uae` GitHub Environment's `AWS_ROLE_ARN` with the value from
+`make platform-output` (role ARN may change on next `pulumi up` if not set). Remove
+the old `Pulumi.dev.yaml` files from both stack directories once migration is confirmed.
 
 ## Key Design Patterns
 
@@ -53,9 +104,10 @@ OpenClaw bootstrap uses a cloud-init YAML file (`templates/cloud-config.yaml.j2`
 
 ### 3. Secret & Data Lifecycle
 
-- **Secrets**: Stored in **AWS SSM Parameter Store**, fetched at service start into `/run/openclaw/.env`
+- **Secrets**: Stored in **AWS SSM Parameter Store** (`/openclaw-lab/dotenv`), fetched at service start into `/run/openclaw/.env` (ephemeral, never on disk)
 - **Data**: Persisted on the root EBS volume at `/opt/openclaw` (includes `.openclaw/` state)
-- **Backups**: S3 sync; data restores use the S3 bucket
+- **Backups**: S3 sync every 20 minutes via systemd timer; data is restored from S3 at boot
+- **Bootstrap scripts**: `docker-compose.yaml`, `cloudwatch-agent-config.json`, and shell scripts are stored in the S3 scripts bucket and downloaded at boot (to keep cloud-init YAML under the 16KB limit)
 
 ### 4. CloudWatch Observability Dashboard
 
@@ -114,11 +166,11 @@ make ec2-spot-prices INSTANCE_TYPES="t4g.small t4g.medium" REGION=us-east-1
 
 ## Configuration & Stacks
 
-Configuration is managed via `pulumi config set` (stored in `Pulumi.dev.yaml` or `Pulumi.prod.yaml`):
+Configuration is managed via `pulumi config set` (stored in `Pulumi.{stack-name}.yaml`):
 
 **Platform stack** (`platform/`):
 - `github_repo` (required): GitHub repo in `owner/repo` format (e.g., `sbasir/openclaw-lab`)
-- `create_oidc_provider` (optional): Set to `true` only on first setup (OIDC provider is account-scoped)
+- `create_oidc_provider` (optional): Set to `true` only on the **first region** you deploy. All additional regions must set this to `false` — OIDC provider is account-scoped.
 
 **EC2 Spot stack** (`ec2-spot/`):
 - `availability_zone` (required): AZ for instance
@@ -135,9 +187,10 @@ Configuration is managed via `pulumi config set` (stored in `Pulumi.dev.yaml` or
 - Both stacks have independent virtual environments (via `pulumi install`)
 
 ### Testing
-- **pytest**: Test files in `tests/` directory (e.g., `test_network_helpers.py`)
+- **pytest**: Test files in `tests/` directory
 - **Pure-Python helpers are unit-testable**: Network helpers, template rendering functions
 - **Pulumi resources not unit-tested**: Use `pulumi preview` to validate resource definitions
+- **Run a single test**: `cd ec2-spot && .venv/bin/python -m pytest tests/test_network_helpers.py::TestCanonicalize::test_normalizes_host_bits_to_network_address -v`
 
 ### CIDR & Network Calculations
 When adding subnet allocation logic:
@@ -154,9 +207,11 @@ When adding subnet allocation logic:
 
 - **.github/workflows/**: GitHub Actions workflows (lint, test, infra-preview, infra-up, build-push-image)
 - **GitHub OIDC**: Provides temporary AWS credentials via `aws-actions/configure-aws-credentials`
-- **Role assumption**: `github_actions_role` in platform stack allows repo to assume AWS role
-- **Stack references**: Workflows can fetch ECR URL from platform stack to push Docker images
-- **Local testing**: Use `make gh-act-*` to test workflows locally (requires `act` CLI)
+- **GitHub Environments** (`uae`, `mumbai`): Store region-specific `AWS_ROLE_ARN` and `AWS_REGION` variables
+- **infra-preview**: Runs matrix across all stacks (`dev.uae`, `dev.mumbai`) on push/PR
+- **infra-up / infra-destroy**: Accept `stack` as `workflow_dispatch` choice input; deploy/destroy one region at a time
+- **build-push-image**: Matrix across all stacks — each job authenticates to its own ECR and pushes independently using per-stack GHA cache scopes
+- **Local testing**: Use `make gh-act-*` to test workflows locally (requires `act` CLI); set `STACK=dev.mumbai` to override the default target
 
 ## File Structure Reference
 
@@ -166,17 +221,21 @@ ec2-spot/
   network_helpers.py             # Pure Python CIDR/subnet calculations
   user_data.py                   # Cloud-init script builder
   template_helpers.py            # Jinja2 template loading/rendering
+  dashboard_builder.py           # CloudWatch dashboard widget composition
   ARCHITECTURE.md                # Data/secret persistence design notes
   tests/
     test_network_helpers.py      # Unit tests for CIDR logic
     test_template_helpers.py     # Unit tests for template rendering
     test_user_data.py            # Unit tests for user-data builder
+    test_s3_lifecycle.py         # Unit tests for S3 snapshot lifecycle
   templates/                     # Jinja2 templates for cloud-init
     cloud-config.yaml.j2         # Main cloud-init script
     openclaw-service.conf        # Systemd service unit template
     docker-compose.yaml          # OpenClaw Docker Compose definition
     cloudwatch-agent-config.json # CloudWatch agent config
     auto-approve-devices.sh      # Device auto-approval helper script
+    openclaw-s3-backup.sh        # S3 backup script (runs on 20-min timer)
+    openclaw-s3-restore.sh       # S3 restore script (runs at boot)
     dotenv.example               # Example .env configuration
 
 platform/

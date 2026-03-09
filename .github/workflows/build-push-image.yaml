@@ -9,7 +9,17 @@ permissions:
 
 jobs:
   build:
+    name: Build and Push (${{ matrix.stack }})
     runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    strategy:
+      fail-fast: false  # A failing region should not cancel other regions
+      matrix:
+        include:
+          - stack: dev.uae
+            environment: uae
+          - stack: dev.mumbai
+            environment: mumbai
 
     steps:
       - name: Checkout code
@@ -24,11 +34,11 @@ jobs:
           ref: main
           path: openclaw
 
-      - name: Setup Pulumi
+      - name: Get ECR repository URL from Pulumi platform stack
         uses: pulumi/actions@v6
         with:
           command: output
-          stack-name: dev
+          stack-name: ${{ matrix.stack }}
           work-dir: repo/platform
         id: pulumi
         env:
@@ -41,8 +51,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Configure AWS credentials (local) 
-        if: ${{ env.ACT }} # only run under act 
+      - name: Configure AWS credentials (local)
+        if: ${{ env.ACT }} # only run under act
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -76,8 +86,8 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:base
-          cache-from: type=gha,scope=base
-          cache-to: type=gha,mode=max,scope=base
+          cache-from: type=gha,scope=base-${{ matrix.stack }}
+          cache-to: type=gha,mode=max,scope=base-${{ matrix.stack }}
 
       - name: Build and push image (custom)
         uses: docker/build-push-action@v6
@@ -86,7 +96,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.pulumi.outputs.ecr_repository_url }}:custom
-          cache-from: type=gha,scope=custom
-          cache-to: type=gha,mode=max,scope=custom
+          cache-from: type=gha,scope=custom-${{ matrix.stack }}
+          cache-to: type=gha,mode=max,scope=custom-${{ matrix.stack }}
           build-contexts: |
             openclaw=docker-image://${{ steps.pulumi.outputs.ecr_repository_url }}:base
